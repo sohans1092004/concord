@@ -73,10 +73,32 @@ describe("drills", () => {
     await drill("pause-owner-no-redis", { afterMs: 10_000 }, async (ctx) => {
       const old = ownerOf(ctx.board)!;
       const before = await metricsOf(old.instance);
+      // A probe: one op that only the stale owner will ever see, sent straight to its internal
+      // endpoint (dev secret). Clients' own ops may all be resent to the new owner while the old
+      // one is frozen, and a batch of nothing but duplicates commits nothing and needs no fence,
+      // so without this the stale owner might never try a fenced commit.
+      const port = 7000 + Number(old.instance.replace("session", ""));
+      const probe = new WebSocket(`ws://localhost:${port}/internal`, { headers: { "X-Concord-Internal": "concord-dev-only-internal-secret-0000000" } } as never);
+      const probeReply = new Promise<Record<string, unknown>>((resolve) => {
+        probe.onmessage = (e) => resolve((JSON.parse(String(e.data)) as { msg: Record<string, unknown> }).msg);
+      });
+      await new Promise<void>((resolve, reject) => {
+        probe.onopen = () => resolve();
+        probe.onerror = () => reject(new Error("probe: internal socket refused"));
+      });
+      const list = ctx.clients[0]!.c.view().lists[0]!.id;
+      const replica = crypto.randomUUID();
+      const probeOp = {
+        op_id: crypto.randomUUID(), board_id: ctx.board, replica_id: replica, type: "SET_FIELD",
+        entity_id: list, field: "title", value: "sent only to the stale owner",
+        hlc: { counter: 0, physical_ms: Date.now(), replica_id: replica },
+      };
       await redisRoute(old.instance, false); // its renewals and publishes now fail
       const pausedAt = Date.now();
       const since = new Date(pausedAt - 1_000).toISOString();
       compose("pause", old.instance);
+      // Delivered into its socket while it is frozen; it reads it when it wakes.
+      probe.send(JSON.stringify({ k: "OP", req: 1, board_id: ctx.board, user_id: ctx.seeded.users[0]!.id, op: probeOp }));
       // Frozen from here: count what it has committed, which must never grow again.
       const ownRows = () => Number(psql(`SELECT count(*) FROM board_ops WHERE board_id = '${ctx.board}' AND fence = ${old.fence}`)[0]);
       const rowsAtPause = ownRows();
@@ -89,6 +111,8 @@ describe("drills", () => {
         await sleep(Math.max(0, 20_000 - (Date.now() - pausedAt)));
         compose("unpause", old.instance); // wakes with requests queued, and still no Redis
         await sleep(8_000);
+        const reply: Record<string, unknown> = await Promise.race([probeReply, sleep(10_000).then(() => ({ type: "NO REPLY" }))]);
+        probe.close();
         const after = await metricsOf(old.instance);
         const logs = compose("logs", "--no-color", "--since", since, old.instance);
         const fencedLines = logs.split(/\r?\n/).filter((l) => l.includes("fenced out by a newer owner") && l.includes(ctx.board));
@@ -101,6 +125,11 @@ describe("drills", () => {
         ctx.log("stale_owner_rows_at_pause_and_after", `${rowsAtPause} -> ${ownRows()}`);
         ctx.log("fenced_out_log_lines", fencedLines.length);
         ctx.log("commits_by_stale_owner_after_pause", staleCommits);
+        ctx.log("probe_reply", `${reply.type} ${reply.code ?? ""}`.trim());
+        ctx.log("probe_stored", Number(psql(`SELECT count(*) FROM board_ops WHERE op_id = '${probeOp.op_id}'`)[0]));
+        expect(reply.type, "the stale owner sent no ACK for the probe").toBe("ERROR");
+        expect(reply.code, "fenced out: NOT_OWNER").toBe("NOT_OWNER");
+        expect(Number(psql(`SELECT count(*) FROM board_ops WHERE op_id = '${probeOp.op_id}'`)[0]), "the probe was never stored").toBe(0);
         expect((after.fence_rejections ?? 0) - (before.fence_rejections ?? 0), "rejected by the Postgres fence").toBeGreaterThan(0);
         expect(fencedLines.length, "the rejection is in its logs").toBeGreaterThan(0);
         // ACKs follow commits only (apply-after-commit, guard-checked), so no new row means no new ACK.

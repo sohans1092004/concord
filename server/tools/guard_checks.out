@@ -17,3 +17,8 @@ fence-counter-rebuild: removed the boards.fence floor in the fence Lua script (S
 fence-check-e2e: removed the fence condition in the commit UPDATE, end to end with the stale owner cut off from Redis
   test drill:pause-owner-no-redis: FAILED without the guard (AssertionError: rejected by the Postgres fence: expected 0 to be greater than 0); PASSED with it restored
 exit 0
+
+command: cd server && python tools/guard_checks.py fence-check-e2e   (2026-10-16T22:10:25Z, after the drill gained its stale-owner-only probe)
+fence-check-e2e: removed the fence condition in the commit UPDATE, end to end with the stale owner cut off from Redis
+  test drill:pause-owner-no-redis: FAILED without the guard (AssertionError: the stale owner sent no ACK for the probe: expected 'OP_ACK' to be 'ERROR' // Object.is equality); PASSED with it restored
+exit 0
