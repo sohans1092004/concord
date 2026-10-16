@@ -54,6 +54,11 @@ describe("drills", () => {
       ctx.log("fence", `${old.fence} -> ${next.value.fence}`);
       ctx.log("new_owner_after_pause_ms", next.at - pausedAt);
       ctx.log("commits_by_stale_owner_after_pause", staleCommits);
+      // How the stale owner stopped: fenced out by Postgres on commit, or its lease renewal
+      // found another owner first. Either way it must not have committed.
+      const port = 7000 + Number(old.instance.replace("session", ""));
+      const metrics = (await (await fetch(`http://localhost:${port}/metrics`)).json()) as Record<string, number>;
+      ctx.log("stale_owner_fence_rejections", metrics.fence_rejections ?? 0);
       expect(staleCommits, "zero commits from the stale owner").toBe(0);
     });
   });
@@ -114,6 +119,18 @@ describe("drills", () => {
       ctx.log("boards_fence", `${fenceBefore} -> ${fenceAfter}`);
       expect(fenceAfter).toBeGreaterThanOrEqual(fenceBefore);
       expect(back.value.fence).toBeGreaterThanOrEqual(before.fence);
+      // The wipe also erased board:fence:{id}. Force a claim: the counter must rebuild from
+      // boards.fence, so the new owner's fence is above every fence Postgres has seen.
+      expect(redisCli("EXISTS", `board:fence:${ctx.board}`)).toBe("0");
+      compose("kill", "-s", "SIGKILL", back.value.instance);
+      const next = await waitFor(() => {
+        const o = ownerOf(ctx.board);
+        return o && o.instance !== back.value.instance ? o : null;
+      }, 60_000, "an owner claimed after the wipe");
+      ctx.log("claimed_after_wipe", `${next.value.instance} fence ${next.value.fence}`);
+      ctx.log("fence_counter_after_claim", redisCli("GET", `board:fence:${ctx.board}`));
+      expect(next.value.fence).toBe(fenceAfter + 1);
+      compose("start", back.value.instance);
     });
   });
 });
