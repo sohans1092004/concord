@@ -41,6 +41,9 @@ public final class BoardActor {
     static final int SNAPSHOT_EVERY_OPS = 500; // SPEC §5.1
     static final long SNAPSHOT_EVERY_MS = 60_000;
     static final int CATCH_UP_LIMIT = 2_000; // SPEC §7.3 step 3
+    static final int REBALANCE_AT = 40; // SPEC §3.7
+    /** board_ops.user_id for ops the owner itself issues (rebalancing). */
+    static final String SYSTEM_USER = Op.NIL_UUID;
 
     /** Where a reply goes: the gateway connection that asked, or a test. */
     @FunctionalInterface
@@ -101,6 +104,9 @@ public final class BoardActor {
     private long nextBoardVersion;
     private int opsSinceSnapshot;
     private long lastSnapshotAt;
+    /** The owner's own replica (SPEC §3.7 rebalancing): fresh per claim, ahead of every HLC applied. */
+    private final String replica = java.util.UUID.randomUUID().toString();
+    private Hlc clock = Hlc.zero(replica);
 
     private BoardActor(String id, Deps d, Runnable onClose) {
         this.id = id;
@@ -385,10 +391,66 @@ public final class BoardActor {
             applyCommitted(w.pending().op(), w.pending().json(), v);
             for (Reply r : w.replies()) r.send(Msg.ack(opId, v));
         }
+        rebalanceIfNeeded(waiting.stream().map(w -> w.pending().op()).toList());
+    }
+
+    /**
+     * SPEC §3.7: when a key passes 40 characters, the owner issues ordinary SET_PLACEMENT ops
+     * with fresh keys for that list (or for the lists), under its own replica ID. They are
+     * committed like any batch and converge like any other op.
+     */
+    @SuppressWarnings("unchecked")
+    private void rebalanceIfNeeded(List<Op> committed) {
+        java.util.Set<String> containers = new java.util.LinkedHashSet<>(); // a list ID, or "" for the lists
+        for (Op op : committed) {
+            switch (op) {
+                case Op.AddList a -> { if (a.positionKey().length() > REBALANCE_AT) containers.add(""); }
+                case Op.AddCard a -> { if (a.positionKey().length() > REBALANCE_AT) containers.add(a.listId()); }
+                case Op.SetPlacement p -> {
+                    if (p.positionKey().length() > REBALANCE_AT) containers.add(p.listId() == null ? "" : p.listId());
+                }
+                default -> {}
+            }
+        }
+        if (containers.isEmpty()) return;
+        List<Map<String, Object>> lists = (List<Map<String, Object>>) board.view().get("lists");
+        for (String container : containers) {
+            List<Map<String, Object>> entries = container.isEmpty()
+                    ? lists.stream().filter(l -> !Op.NIL_UUID.equals(l.get("id"))).toList()
+                    : lists.stream().filter(l -> container.equals(l.get("id"))).findFirst()
+                            .map(l -> (List<Map<String, Object>>) l.get("cards")).orElse(List.of());
+            List<String> keys = entries.stream().map(e -> (String) e.get("position_key")).toList();
+            List<String> fresh = dev.concord.crdt.Keys.rebalance(keys);
+            int n = 0;
+            for (int i = 0; i < entries.size(); i++) {
+                if (fresh.get(i).equals(keys.get(i))) continue;
+                clock = clock.tick(d.clock().getAsLong());
+                Map<String, Object> json = new LinkedHashMap<>();
+                json.put("op_id", Op.newOpId());
+                json.put("board_id", id);
+                json.put("hlc", clock.encode());
+                json.put("replica_id", replica);
+                json.put("type", "SET_PLACEMENT");
+                json.put("entity_id", entries.get(i).get("id"));
+                json.put("placement", Op.placement(container.isEmpty() ? null : container, fresh.get(i)));
+                Op op = Op.parse(json);
+                if (batch.isEmpty()) batchDeadline = d.clock().getAsLong();
+                batch.put(op.opId(), new Waiting(new Store.Pending(op, json, SYSTEM_USER), new ArrayList<>()));
+                n++;
+            }
+            d.metrics().inc("rebalances");
+            log.atInfo().addKeyValue("board_id", id).addKeyValue("list_id", container.isEmpty() ? "lists" : container)
+                    .addKeyValue("ops", n).log("rebalancing keys");
+        }
     }
 
     /** Step 4, for one committed op: apply to memory, remember its ACK, publish. */
     private void applyCommitted(Op op, Map<String, Object> json, long v) {
+        try {
+            clock = clock.receive(op.hlc(), d.clock().getAsLong()); // our next op outranks every applied one
+        } catch (RuntimeException e) {
+            // a counter at its maximum: tick() moves on with the wall clock
+        }
         int collisions = board.apply(op);
         if (collisions > 0) d.metrics().add("lww_collisions", collisions);
         version = v;
