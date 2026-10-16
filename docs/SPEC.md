@@ -537,6 +537,53 @@ main correctness claim, and both gate every merge in CI.
 
 - Canonical state encoding: JSON with sorted keys (RFC 8785), so equal states give
   equal bytes and an equal SHA-256.
+
+#### 9.2.1 HLC encoding
+
+An HLC is a JSON object with exactly three fields:
+
+```json
+{"counter": 0, "physical_ms": 1760000000000, "replica_id": "a0000000-0000-4000-8000-000000000001"}
+```
+
+- `physical_ms`: integer, 0 ≤ n ≤ 2^53 − 1 (milliseconds since the Unix epoch).
+- `counter`: integer, 0 ≤ n ≤ 2^31 − 1 (fits `board_ops.hlc_counter INT`).
+- `replica_id`: lowercase canonical UUID string (`8-4-4-4-12` hex digits).
+- Order: `physical_ms`, then `counter`, then `replica_id` compared as unsigned UTF-8
+  bytes. Never compare `java.util.UUID` values: `UUID.compareTo` uses signed longs and
+  disagrees with byte order.
+
+#### 9.2.2 Canonical JSON
+
+The canonical encoding is RFC 8785 (JCS) restricted to integers:
+
+- No whitespace. Object members sorted by key, comparing UTF-16 code units (RFC 8785
+  §3.2.3). Every key Concord itself writes is ASCII, where this equals byte order.
+- Numbers are integers in the safe range ±(2^53 − 1), written in plain decimal. Any
+  other number is an encoding error.
+- Strings: escape only `"` → `\"`, `\` → `\\`, and characters below U+0020: `\b`, `\f`,
+  `\n`, `\r`, `\t` where they apply, otherwise `\u00xx` with lowercase hex. Every other
+  character is written as itself, encoded as UTF-8. A string that is not well-formed
+  Unicode (a lone surrogate) is an encoding error.
+- Hashes are SHA-256 over the UTF-8 bytes of the canonical encoding, written as 64
+  lowercase hex characters.
+
+#### 9.2.3 Canonical state
+
+```json
+{
+  "cards":     {"adds": {"<card_id>": ["<tag>", ...]}, "tombstones": ["<tag>", ...]},
+  "lists":     {"adds": {"<list_id>": ["<tag>", ...]}, "tombstones": ["<tag>", ...]},
+  "registers": {"<entity_id>": {"<field>": {"hlc": <HLC>, "value": <value>}}}
+}
+```
+
+- Every tag array is sorted ascending by unsigned UTF-8 bytes, with no duplicates.
+- An ID appears under `adds` only with at least one tag, and under `registers` only with
+  at least one field. The empty state is
+  `{"cards":{"adds":{},"tombstones":[]},"lists":{"adds":{},"tombstones":[]},"registers":{}}`.
+- The state holds CRDT data only: no replica clock, no board ID, no op log. Two replicas
+  that have applied the same op set therefore encode to the same bytes.
 - `conformance/vectors/*.json`: an initial state, an op list and the expected view and
   state hash. At least 50 hand-written vectors, one per rule in §3, plus every shrunk fuzz
   failure.
@@ -640,12 +687,10 @@ Four are decided in this spec; the rest record choices made or measured during t
 | 007 | Fence in Postgres, not Redis; owners keep serving while Redis is down | Write during Phase 2 |
 | 008 | Snapshot every 500 ops or 60s, keep three | Write after the recovery test |
 
-### 11.1 Open before Phase 1
+### 11.1 Open before Phase 1 (resolved)
 
-- Confirm ADR-000b. If time is short, choose TypeScript everywhere: §9.2 then shrinks
-  to golden vectors only, and the server's threading story becomes Node's event loop.
-- Pick the HLC encoding for JSON (three fields, not a packed string) so both languages
-  agree from the first vector.
+- ~~Confirm ADR-000b.~~ Confirmed: Java 21 and TypeScript, with the full §9.2 suite.
+- ~~Pick the HLC encoding for JSON.~~ Three fields, §9.2.1. Canonical encoding §9.2.2–9.2.3.
 - Write the first ten conformance vectors by hand before writing either implementation.
 
 ### 11.2 Open before Phase 2
@@ -660,3 +705,4 @@ section text itself is updated in the same commit.
 
 | # | Date | Sections | Change |
 |---|---|---|---|
+| 1 | 2026-10-16 | §9.2.1–9.2.3, §11.1 | HLC JSON is three fields; canonical encoding is integer-only RFC 8785 with fixed escapes; canonical state shape defined; ADR-000b confirmed. |
