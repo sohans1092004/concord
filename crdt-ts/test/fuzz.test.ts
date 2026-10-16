@@ -20,11 +20,16 @@ function problem(s: Scenario): string | null {
   return null;
 }
 
-function fuzz(name: string, arb: fc.Arbitrary<Scenario>, runs: number): void {
+// Yield to the event loop between scenarios: a long synchronous run starves Vitest's
+// worker RPC, which then fails the run with "Timeout calling onTaskUpdate".
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+async function fuzz(name: string, arb: fc.Arbitrary<Scenario>, runs: number): Promise<void> {
   let ops = 0;
   const started = Date.now();
-  const result = fc.check(
-    fc.property(arb, (s) => {
+  const result = await fc.check(
+    fc.asyncProperty(arb, async (s) => {
+      await yieldToEventLoop();
       ops += s.steps.length;
       return problem(s) === null;
     }),
@@ -45,18 +50,18 @@ function fuzz(name: string, arb: fc.Arbitrary<Scenario>, runs: number): void {
 }
 
 describe("permutation fuzz", () => {
-  it(`every replica converges to byte-identical state (${RUNS} scenarios)`, () => {
-    fuzz("fuzz", scenarioArb(), RUNS);
+  it(`every replica converges to byte-identical state (${RUNS} scenarios)`, async () => {
+    await fuzz("fuzz", scenarioArb(), RUNS);
   });
 
   // Ordinary scenarios rarely drive a key past the 40-character rebalance mark, so this
   // one forces same-gap inserts with replica 0 making ~80% of them (SPEC §3.7).
   const rebalanceRuns = Math.max(50, Math.round(RUNS / 10));
-  it(`converges while keys are rebalanced under same-gap pressure (${rebalanceRuns} scenarios)`, () => {
+  it(`converges while keys are rebalanced under same-gap pressure (${rebalanceRuns} scenarios)`, async () => {
     const arb = scenarioArb(450, 500, true).map((s) => ({
       ...s,
       steps: s.steps.map((st) => (st.x % 5 !== 0 ? { ...st, r: 0 } : st)),
     }));
-    fuzz("rebalance-fuzz", arb, rebalanceRuns);
+    await fuzz("rebalance-fuzz", arb, rebalanceRuns);
   });
 });

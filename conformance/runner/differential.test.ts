@@ -34,9 +34,16 @@ function java(requests: readonly object[]): Record<string, unknown>[] {
   return lines.map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
-function inBatches<T, R>(xs: readonly T[], size: number, f: (batch: readonly T[]) => R[]): R[] {
+// Yield to the event loop between batches: a long synchronous run starves Vitest's
+// worker RPC, which then fails the run with "Timeout calling onTaskUpdate".
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+async function inBatches<T, R>(xs: readonly T[], size: number, f: (batch: readonly T[]) => R[]): Promise<R[]> {
   const out: R[] = [];
-  for (let i = 0; i < xs.length; i += size) out.push(...f(xs.slice(i, i + size)));
+  for (let i = 0; i < xs.length; i += size) {
+    out.push(...f(xs.slice(i, i + size)));
+    await yieldToEventLoop();
+  }
   return out;
 }
 
@@ -45,9 +52,9 @@ describe("differential: crdt-ts vs crdt-java", () => {
     expect(existsSync(JAR), `${JAR} missing; run ./gradlew jar in crdt-java`).toBe(true);
   });
 
-  it(`same state and view hashes over ${RUNS} fuzz scenarios, Java fed a different order with duplicates`, () => {
+  it(`same state and view hashes over ${RUNS} fuzz scenarios, Java fed a different order with duplicates`, async () => {
     const scenarios = [...sampleScenarios(Math.ceil(RUNS * 0.9), SEED), ...sampleScenarios(Math.floor(RUNS * 0.1), SEED + 1, 450, 500, true)];
-    const cases = scenarios.map((s) => {
+    const cases = await inBatches(scenarios, 50, (batch) => batch.map((s) => {
       const ops = generate(s).ops;
       const b = Board.empty();
       let collisions = 0;
@@ -56,8 +63,8 @@ describe("differential: crdt-ts vs crdt-java", () => {
         ops: deliveryOrder(ops.map((_, i) => i), s.seed ^ 0x5eed).map((i) => ops[i]!),
         expected: { collisions, rejected: {}, state_sha256: sha256(b.canonical()), view_sha256: sha256(canonicalize(b.view())) },
       };
-    });
-    const answers = inBatches(cases, 50, (batch) => java(batch.map((c) => ({ cmd: "run", ops: c.ops }))));
+    }));
+    const answers = await inBatches(cases, 50, (batch) => java(batch.map((c) => ({ cmd: "run", ops: c.ops }))));
     let opCount = 0;
     cases.forEach((c, i) => {
       opCount += c.ops.length;
