@@ -73,7 +73,7 @@ Fuzz runs recorded:
 | `cd crdt-ts && npm test` (500 seeds + 50 rebalance seeds) | green, 32.7s |
 | `cd crdt-java && ./gradlew test` (500 seeds + 50 rebalance seeds) | green: `fuzz: 500 seeds from 1, 135967 steps, 11.4s` |
 | `cd conformance/runner && npm test` (`DIFF_RUNS=500`) | green: all state/view hashes, verdicts and bytes equal |
-| `cd crdt-ts && FUZZ_RUNS=100000 npx vitest run test/fuzz.test.ts` | pending |
+| `cd crdt-ts && FUZZ_RUNS=100000 npx vitest run test/fuzz.test.ts` | not yet completed: the 2026-10-16 run was stopped by the host for low system memory before finishing; no result recorded |
 
 ## What the fuzz suite proves, and what it does not
 
