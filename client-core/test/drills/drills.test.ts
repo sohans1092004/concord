@@ -119,9 +119,12 @@ describe("drills", () => {
       ctx.log("boards_fence", `${fenceBefore} -> ${fenceAfter}`);
       expect(fenceAfter).toBeGreaterThanOrEqual(fenceBefore);
       expect(back.value.fence).toBeGreaterThanOrEqual(before.fence);
-      // The wipe also erased board:fence:{id}. Force a claim: the counter must rebuild from
-      // boards.fence, so the new owner's fence is above every fence Postgres has seen.
-      expect(redisCli("EXISTS", `board:fence:${ctx.board}`)).toBe("0");
+      // The wipe also erased board:fence:{id}. A gateway's claim watchdog may already have
+      // claimed (and recreated the counter) before the owner's renewal re-took the lease;
+      // either way, force a claim now: its fence must be above every fence Postgres has seen,
+      // which an INCR on a wiped counter (starting again at 1) would not give.
+      const floor = Number(psql(`SELECT fence FROM boards WHERE id = '${ctx.board}'`)[0]);
+      ctx.log("boards_fence_before_forced_claim", floor);
       compose("kill", "-s", "SIGKILL", back.value.instance);
       const next = await waitFor(() => {
         const o = ownerOf(ctx.board);
@@ -129,7 +132,8 @@ describe("drills", () => {
       }, 60_000, "an owner claimed after the wipe");
       ctx.log("claimed_after_wipe", `${next.value.instance} fence ${next.value.fence}`);
       ctx.log("fence_counter_after_claim", redisCli("GET", `board:fence:${ctx.board}`));
-      expect(next.value.fence).toBe(fenceAfter + 1);
+      expect(next.value.fence).toBe(floor + 1);
+      expect(Number(psql(`SELECT fence FROM boards WHERE id = '${ctx.board}'`)[0])).toBe(next.value.fence);
       compose("start", back.value.instance);
     });
   });
