@@ -1,0 +1,23 @@
+{
+  "name": "@concord/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless Concord sync client: confirmed replica, pending queue, view, reconnect, gap detection, every SPEC §7.4 rejection path.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run test/unit",
+    "e2e": "vitest run test/e2e"
+  },
+  "dependencies": {
+    "@concord/crdt": "file:../crdt-ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}
