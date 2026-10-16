@@ -18,7 +18,7 @@ Write the CRDT core twice, `crdt-java` (Java 21, Gradle, no frameworks) and `crd
 
 1. **Canonical encoding.** RFC 8785 JSON restricted to integers, with fixed escapes; every
    state has exactly one byte string and SHA-256 (SPEC §9.2.2–9.2.3).
-2. **Golden vectors.** 50 hand-written cases in `conformance/vectors/`, each with the
+2. **Golden vectors.** 54 hand-written cases in `conformance/vectors/`, each with the
    expected view, state and hash. Hashes are computed by a third implementation (Python's
    JSON encoder) from the hand-written expected state, never by either core.
 3. **Differential fuzz.** The TypeScript fuzzer drives the Java core through a line

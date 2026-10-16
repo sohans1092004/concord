@@ -31,7 +31,7 @@ which is a credited port (ADR-001); everything else is written for this project.
 ## Consequences
 
 - Correctness is on us, so the test suite is the product: merge-law property tests per
-  module, a permutation fuzz with 500 seeds per commit and 100,000 nightly, 50 hand-written
+  module, a permutation fuzz with 500 seeds per commit and 100,000 nightly, 54 hand-written
   conformance vectors, and a differential fuzz between the two cores (SPEC §9). The fuzzers
   were themselves tested by injecting three bugs (arrival-order LWW, a delete that forgets
   unseen tags, an HLC that ignores its counter); each was caught within 200 runs.
