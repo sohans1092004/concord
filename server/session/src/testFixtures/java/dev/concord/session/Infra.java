@@ -33,13 +33,13 @@ public final class Infra {
 
     @SuppressWarnings("resource")
     public static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withNetwork(NET).withExposedPorts(6379);
+            .withNetwork(NET).withNetworkAliases("redis").withExposedPorts(6379);
 
     public static final ToxiproxyContainer TOXI = new ToxiproxyContainer(DockerImageName.parse("ghcr.io/shopify/toxiproxy:2.9.0"))
             .withNetwork(NET);
 
     private static DataSource direct;
-    private static Proxy pgProxy;
+    private static Proxy pgProxy, redisProxy;
 
     public static synchronized void start() {
         if (direct != null) return;
@@ -54,7 +54,9 @@ public final class Infra {
         direct = new HikariDataSource(h);
         try {
             Migrate.run(direct);
-            pgProxy = new ToxiproxyClient(TOXI.getHost(), TOXI.getControlPort()).createProxy("pg", "0.0.0.0:8666", "pg:5432");
+            ToxiproxyClient toxi = new ToxiproxyClient(TOXI.getHost(), TOXI.getControlPort());
+            pgProxy = toxi.createProxy("pg", "0.0.0.0:8666", "pg:5432");
+            redisProxy = toxi.createProxy("redis", "0.0.0.0:8667", "redis:6379");
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
@@ -70,6 +72,17 @@ public final class Infra {
     public static Proxy pgProxy() {
         start();
         return pgProxy;
+    }
+
+    /** The Redis proxy, for taking Redis away from one service only. */
+    public static Proxy redisProxy() {
+        start();
+        return redisProxy;
+    }
+
+    public static String redisUrlViaProxy() {
+        start();
+        return "redis://" + TOXI.getHost() + ":" + TOXI.getMappedPort(8667);
     }
 
     public static String redisUrl() {

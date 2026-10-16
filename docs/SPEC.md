@@ -468,7 +468,6 @@ snapshot (§7).
 | `board:owner:{id}` | `{instance, address, fence}` for gateway lookup | Same as the lease |
 | `board:{id}` (channel) | Committed ops for fan-out | Ephemeral |
 | `presence:{id}` (sorted set) | Member = `user:card:state`, score = last seen | Swept every 10s, entries older than 30s removed |
-| `rl:{connection}` | Token bucket, as Reliant's Lua script | Expires when idle |
 
 ## 6. Write path and ownership
 
@@ -802,7 +801,9 @@ independent of both cores.
   removal takes effect on the next op, not the next connect.
 - The WebSocket upgrade checks `Origin` against an allowlist, preventing cross-site
   WebSocket hijacking.
-- Rate limit per connection: 20 ops/s, burst 50. Frames over 64 KB are rejected.
+- Rate limit per connection: 20 ops/s, burst 50, as a token bucket in the gateway's memory
+  (a connection lives on one gateway, and limiting must keep working while Redis is down).
+  Frames over 64 KB are rejected.
 - Passwords hashed with argon2id. Sessions stored hashed, as in Reliant.
 
 ### 9.5 Observability
@@ -904,3 +905,4 @@ section text itself is updated in the same commit.
 | 4 | 2026-10-16 | §3.2, §4.1, §4.2, §7.4, §9.2.3 | Tombstones are per entity, `{entity_id: [tags]}`, so a delete naming X only tombstones (X, tag) pairs (closes the cross-card delete found in Phase 1; vectors 051–054). Approved: `hlc.replica_id` must equal `replica_id`; lone surrogates rejected; state decode checks placement shape. NFC table mismatch documented as a known limitation. `INVALID_OP` moves the op to Unsent edits instead of dropping it. The server is the only parser of client JSON and rejects duplicate member names. |
 | 5 | 2026-10-16 | §4.2, §5.1 | `validateShape` rejects U+0000 in every string (Postgres JSONB cannot store it), in both cores; vector 050 now uses U+0001 and vector 055 pins the rejection. Snapshot `sha256` is over the canonical re-encoding of the loaded state, since JSONB does not keep bytes. |
 | 6 | 2026-10-16 | §2.2, §4.2, §6.1, §6.2 | (A) Claim order: atomic floor-and-INCR, lease, then `UPDATE boards SET fence … WHERE fence < :fence` before loading; commits require `fence = :fence`. (B) After a failed or timed-out commit the actor reconciles from `board_ops` under the board row lock before serving, answering `RETRY_LATER` and taking no snapshots meanwhile. (D) One writer per board actor over a shared pool; pool wait counts toward the 2s timeout. (E) Admission rules: ADD of an existing ID, references of the right kind, list fields and placement form; server-only, merge still accepts any order; dedup by `board_ops` before any rejection. |
+| 7 | 2026-10-16 | §5.2, §9.4 | (F) The per-connection token bucket lives in the gateway's memory; the `rl:{connection}` Redis key is removed. |

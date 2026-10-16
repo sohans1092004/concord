@@ -1,0 +1,19 @@
+<configuration>
+  <!-- JSON lines (SPEC §9.5): key-values such as board_id, op_id and user_id become fields. -->
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+      <withFormattedMessage>true</withFormattedMessage>
+      <withMessage>false</withMessage>
+      <withArguments>false</withArguments>
+      <withSequenceNumber>false</withSequenceNumber>
+      <withNanoseconds>false</withNanoseconds>
+      <withContextName>false</withContextName>
+    </encoder>
+  </appender>
+  <logger name="org.eclipse.jetty" level="WARN"/>
+  <logger name="io.javalin" level="WARN"/>
+  <logger name="io.lettuce" level="WARN"/>
+  <logger name="io.netty" level="WARN"/>
+  <logger name="com.zaxxer.hikari" level="WARN"/>
+  <root level="INFO"><appender-ref ref="STDOUT"/></root>
+</configuration>
