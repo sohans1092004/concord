@@ -198,7 +198,8 @@ public sealed interface Op {
         }
 
         private static boolean goodString(Object x, int max) {
-            return x instanceof String s && Canonical.isWellFormed(s) && s.codePointCount(0, s.length()) <= max;
+            // No U+0000: Postgres JSONB cannot store it (SPEC §4.2).
+            return x instanceof String s && Canonical.isWellFormed(s) && s.indexOf(0) < 0 && s.codePointCount(0, s.length()) <= max;
         }
 
         private static String fieldValue(Object field, Object value) {

@@ -847,13 +847,14 @@ vector(
                             "placement": reg({"position_key": "a0"}, H(0, 0, 1))}}),
 )
 
-TRICKY = "tab\t nul\u0000 quote\" back\\ é 😀   del\u007f \u001f"
+TRICKY = "tab\t soh\u0001 quote\" back\\ é 😀   del\u007f \u001f"
 
 vector(
     "050-canonical-escaping-in-the-state-hash", "§9.2.2",
-    "Strings with a tab, NUL, quote, backslash, é, an emoji, U+2028, DEL and U+001F. The "
+    "Strings with a tab, U+0001, quote, backslash, é, an emoji, U+2028, DEL and U+001F. The "
     "canonical encoding escapes only the quote, backslash and characters below U+0020 "
-    "(\\t, \\u0000, \\u001f); everything else is raw UTF-8, so the hash pins the exact bytes.",
+    "(\\t, \\u0001, \\u001f); everything else is raw UTF-8, so the hash pins the exact bytes. "
+    "U+0000 itself is rejected by validateShape (vector 055).",
     ops + [set_field(3, H(2, 0, 1), C(1), "description", TRICKY),
            set_field(4, H(3, 0, 1), C(1), "labels", ["é", "😀"])],
     view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card", description=TRICKY, labels=["é", "😀"])])),
@@ -903,6 +904,22 @@ vector(
     view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card")])),
     state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs={C(1): [O(2)]},
           registers={**lregs, C(1): c1}),
+)
+
+
+ops, lregs, c1 = base_board()
+vector(
+    "055-nul-in-any-string-is-invalid", "§4.2",
+    "U+0000 is rejected in every string field (Postgres JSONB cannot store it): a title, a "
+    "description and a label. U+0001 is accepted. The board is unchanged by the rejected ops.",
+    ops + [add_card(3, H(2, 0, 1), C(2), L(1), "a1", "nul\u0000title"),
+           set_field(4, H(3, 0, 1), C(1), "description", "\u0000"),
+           set_field(5, H(4, 0, 1), C(1), "labels", ["ok", "x\u0000"]),
+           set_field(6, H(5, 0, 1), C(1), "description", "soh\u0001")],
+    view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card", description="soh\u0001")])),
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]},
+          registers={**lregs, C(1): {**c1, "description": reg("soh\u0001", H(5, 0, 1))}}),
+    expected_rejected={O(3): "INVALID_OP", O(4): "INVALID_OP", O(5): "INVALID_OP"},
 )
 
 

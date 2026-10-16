@@ -1,7 +1,7 @@
 {
   "name": "050-canonical-escaping-in-the-state-hash",
   "rule": "§9.2.2",
-  "description": "Strings with a tab, NUL, quote, backslash, é, an emoji, U+2028, DEL and U+001F. The canonical encoding escapes only the quote, backslash and characters below U+0020 (\\t, \\u0000, \\u001f); everything else is raw UTF-8, so the hash pins the exact bytes.",
+  "description": "Strings with a tab, U+0001, quote, backslash, é, an emoji, U+2028, DEL and U+001F. The canonical encoding escapes only the quote, backslash and characters below U+0020 (\\t, \\u0001, \\u001f); everything else is raw UTF-8, so the hash pins the exact bytes. U+0000 itself is rejected by validateShape (vector 055).",
   "initial_state": {
     "cards": {
       "adds": {},
@@ -59,7 +59,7 @@
       "type": "SET_FIELD",
       "entity_id": "cc000000-0000-4000-8000-000000000001",
       "field": "description",
-      "value": "tab\t nul\u0000 quote\" back\\ é 😀   del \u001f"
+      "value": "tab\t soh\u0001 quote\" back\\ é 😀   del \u001f"
     },
     {
       "op_id": "0e000000-0000-4000-8000-000000000004",
@@ -92,7 +92,7 @@
             "id": "cc000000-0000-4000-8000-000000000001",
             "position_key": "a0",
             "title": "Card",
-            "description": "tab\t nul\u0000 quote\" back\\ é 😀   del \u001f",
+            "description": "tab\t soh\u0001 quote\" back\\ é 😀   del \u001f",
             "labels": [
               "é",
               "😀"
@@ -166,7 +166,7 @@
             "physical_ms": 1760000000002,
             "replica_id": "a0000000-0000-4000-8000-000000000001"
           },
-          "value": "tab\t nul\u0000 quote\" back\\ é 😀   del \u001f"
+          "value": "tab\t soh\u0001 quote\" back\\ é 😀   del \u001f"
         },
         "labels": {
           "hlc": {
@@ -182,5 +182,5 @@
       }
     }
   },
-  "expected_state_sha256": "1ab06f5f55b2050a003ca310644f504c210a9db3e533de5da64dbedac3024004"
+  "expected_state_sha256": "7e6ea668eec53a0e08a29f85a4060d7187c0cb398004459da66add40d4b36166"
 }

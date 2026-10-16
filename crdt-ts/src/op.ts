@@ -59,7 +59,10 @@ const codePoints = (s: string): number => {
   for (const _ of s) n++;
   return n;
 };
-const goodString = (x: unknown, max: number): x is string => typeof x === "string" && x.isWellFormed() && codePoints(x) <= max;
+// No U+0000: Postgres JSONB cannot store it (SPEC §4.2).
+const NUL = String.fromCharCode(0);
+const goodString = (x: unknown, max: number): x is string =>
+  typeof x === "string" && x.isWellFormed() && !x.includes(NUL) && codePoints(x) <= max;
 
 function exactMembers(o: Record<string, unknown>, expected: readonly string[]): string | null {
   const keys = Object.keys(o);

@@ -23,7 +23,7 @@ class FuzzTest {
     static final long T0 = 1760000000000L;
     static final int REBALANCE_AT = 40;
     static final String[] TITLES = {"a", "b", "Ünïcødé", "😀 emoji", "tab\there", "line\nbreak", ""};
-    static final String[] DESCRIPTIONS = {"", "d1", "longer description", "\u0000ctl"};
+    static final String[] DESCRIPTIONS = {"", "d1", "longer description", "\u0001ctl"};
     static final List<List<String>> LABELS = List.of(List.of(), List.of("bug"), List.of("bug", "p1"), List.of("p1", "ux"), List.of("é"));
 
     static String id(String prefix, Random r) {

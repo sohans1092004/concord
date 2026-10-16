@@ -323,7 +323,8 @@ Its exact rules, beyond step 1:
 - No ID may be the nil UUID `00000000-0000-0000-0000-000000000000`, which is reserved for
   Orphaned (§3.6). In particular `ADD_CARD` and `SET_PLACEMENT` cannot target it.
 - Lengths are counted in Unicode code points, so Java and TypeScript agree. Strings must
-  be well-formed Unicode (no lone surrogates).
+  be well-formed Unicode (no lone surrogates) and must not contain U+0000, which Postgres
+  JSONB cannot store (§5.1; vector 055).
 - `labels`: at most 20; each at most 50 code points and already in Unicode NFC form;
   sorted strictly ascending by unsigned UTF-8 bytes (which also makes them unique).
   Anything else is rejected, not normalised.
@@ -419,11 +420,16 @@ CREATE TABLE board_snapshots (
     board_id UUID NOT NULL REFERENCES boards(id),
     version BIGINT NOT NULL,             -- last op version included
     state JSONB NOT NULL,
-    sha256 TEXT NOT NULL,                -- checked on load
+    sha256 TEXT NOT NULL,                -- of the canonical encoding (§9.2.2); checked on load
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (board_id, version)
 );
 ```
+
+JSONB does not keep the bytes it was given (it reorders members and drops whitespace), so
+a snapshot's `sha256` is the SHA-256 of the canonical encoding (§9.2.2) of its state, and
+on load the state read back from JSONB is decoded, re-encoded canonically and hashed
+again before it is compared.
 
 Version is a per-board counter assigned by the owner at commit. It orders broadcasts
 and lets clients detect gaps (§6.4). It is not used for merge; the HLC is.
@@ -856,3 +862,4 @@ section text itself is updated in the same commit.
 | 2 | 2026-10-16 | §3.1, §3.4, §3.6, §3.7, §4.1, §4.2, §9.1, §9.2.4–9.2.5 | `checkClock` with a strict 60,000ms boundary; defensive LWW tie-break on unsigned canonical bytes, reported as a collision count; exact Orphaned rules with the nil-UUID reserved ID; Greenspan key format ("fractional part never ends in `0`"), `keyBetween` throws unless `a < b`, re-key rule for equal neighbours; op JSON encoding; `validateShape` rules (lowercase canonical UUIDs, no nil UUID, code-point lengths, NFC sorted labels ≤ 50 code points); view and vector formats. |
 | 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |
 | 4 | 2026-10-16 | §3.2, §4.1, §4.2, §7.4, §9.2.3 | Tombstones are per entity, `{entity_id: [tags]}`, so a delete naming X only tombstones (X, tag) pairs (closes the cross-card delete found in Phase 1; vectors 051–054). Approved: `hlc.replica_id` must equal `replica_id`; lone surrogates rejected; state decode checks placement shape. NFC table mismatch documented as a known limitation. `INVALID_OP` moves the op to Unsent edits instead of dropping it. The server is the only parser of client JSON and rejects duplicate member names. |
+| 5 | 2026-10-16 | §4.2, §5.1 | `validateShape` rejects U+0000 in every string (Postgres JSONB cannot store it), in both cores; vector 050 now uses U+0001 and vector 055 pins the rejection. Snapshot `sha256` is over the canonical re-encoding of the loaded state, since JSONB does not keep bytes. |

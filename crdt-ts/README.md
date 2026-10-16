@@ -19,5 +19,5 @@ board.canonical();                              // RFC 8785 bytes; SHA-256 is th
 ```
 
 Rules, encodings and test strategy: see `docs/SPEC.md` and the repository README.
-`npm test` runs the unit and property tests, the 54 conformance vectors (bundled in
+`npm test` runs the unit and property tests, the 55 conformance vectors (bundled in
 `vectors/`) and 500 permutation-fuzz seeds (`FUZZ_RUNS` to change).

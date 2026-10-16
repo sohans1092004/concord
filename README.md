@@ -7,7 +7,7 @@ byte-identical state. No networking, no storage: Phase 1 of [`docs/SPEC.md`](doc
 ```
 crdt-ts/              TypeScript core + property tests + permutation fuzz (vitest, fast-check)
 crdt-java/            Java core + the same tests (JUnit 5, jqwik) + a line-protocol CLI
-conformance/vectors/  54 hand-written golden vectors, shared by both cores
+conformance/vectors/  55 hand-written golden vectors, shared by both cores
 conformance/tools/    build_vectors.py: expands the hand-written vectors and hashes them
 conformance/runner/   differential fuzz: TypeScript generates, Java answers, any mismatch fails
 docs/adr/             ADR-000, 000b, 001, 002, 003
@@ -41,7 +41,7 @@ rebalance, planInsert), `board` (apply, merge, view, encode/decode, liveTags).
 Requirements: Node 20+, JDK 21, Python 3 (vectors only).
 
 ```sh
-# TypeScript: typecheck, unit + property tests, 54 vectors, 500 fuzz seeds
+# TypeScript: typecheck, unit + property tests, 55 vectors, 500 fuzz seeds
 cd crdt-ts && npm ci && npm run typecheck && npm test
 npm run coverage                                     # the same, with V8 branch coverage
 
@@ -65,8 +65,8 @@ Counts from the last full local run (2026-10-16):
 
 | Suite | Tests | Of which |
 |---|---|---|
-| crdt-ts (`npm test`) | 108 | hlc 6, canonical 7, op 10, keys 10, orset 6, lww 5, board 6, vectors 55 (54 + dir check), fuzz 2, generator coverage 1 |
-| crdt-java (`./gradlew test`) | 108 | Hlc 7, Canonical 8, Op 11, Keys 8, merge laws 15 (orset 6, lww 4, board 5), vectors 56 (54 + dir + boundary check), fuzz 2, generator coverage 1 |
+| crdt-ts (`npm test`) | 109 | hlc 6, canonical 7, op 10, keys 10, orset 6, lww 5, board 6, vectors 56 (55 + dir check), fuzz 2, generator coverage 1 |
+| crdt-java (`./gradlew test`) | 109 | Hlc 7, Canonical 8, Op 11, Keys 8, merge laws 15 (orset 6, lww 4, board 5), vectors 57 (55 + dir + boundary check), fuzz 2, generator coverage 1 |
 | differential (`conformance/runner`) | 4 | 500 scenarios / 174,834 op deliveries; 20,000 hostile ops; 20,000 Unicode values |
 
 Fuzz runs recorded:

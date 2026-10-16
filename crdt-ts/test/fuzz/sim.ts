@@ -83,7 +83,7 @@ function idFor(prefix: string, i: number, seed: number): string {
 }
 
 const TITLES = ["a", "b", "Ünïcødé", "😀 emoji", "tab\there", "line\nbreak", ""];
-const DESCRIPTIONS = ["", "d1", "longer description", "\u0000ctl"];
+const DESCRIPTIONS = ["", "d1", "longer description", "\u0001ctl"];
 const LABELS: readonly (readonly string[])[] = [[], ["bug"], ["bug", "p1"], ["p1", "ux"], ["é"]];
 
 class Replica {
