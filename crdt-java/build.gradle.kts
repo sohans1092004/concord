@@ -27,6 +27,9 @@ tasks.test {
     useJUnitPlatform()
     maxHeapSize = "1g"
     systemProperty("concord.vectors", project.findProperty("vectors") ?: "${rootDir}/../conformance/vectors")
-    System.getenv("FUZZ_RUNS")?.let { systemProperty("jqwik.tries.default", it) }
-    testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+    testLogging {
+        events("failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
