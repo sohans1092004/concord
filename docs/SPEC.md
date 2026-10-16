@@ -834,5 +834,5 @@ section text itself is updated in the same commit.
 | # | Date | Sections | Change |
 |---|---|---|---|
 | 1 | 2026-10-16 | §9.2.1–9.2.3, §11.1 | HLC JSON is three fields; canonical encoding is integer-only RFC 8785 with fixed escapes; canonical state shape defined; ADR-000b confirmed. |
-| 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |
 | 2 | 2026-10-16 | §3.1, §3.4, §3.6, §3.7, §4.1, §4.2, §9.1, §9.2.4–9.2.5 | `checkClock` with a strict 60,000ms boundary; defensive LWW tie-break on unsigned canonical bytes, reported as a collision count; exact Orphaned rules with the nil-UUID reserved ID; Greenspan key format ("fractional part never ends in `0`"), `keyBetween` throws unless `a < b`, re-key rule for equal neighbours; op JSON encoding; `validateShape` rules (lowercase canonical UUIDs, no nil UUID, code-point lengths, NFC sorted labels ≤ 50 code points); view and vector formats. |
+| 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |

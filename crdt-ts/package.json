@@ -18,7 +18,8 @@
     "test",
     "vectors",
     "tsconfig.json",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "README.md"
   ],
   "sideEffects": false,
   "engines": {
