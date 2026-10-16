@@ -1,0 +1,92 @@
+# The Phase 2 stack (SPEC §10): 2 gateways, 3 Session instances, Postgres 16, Redis 7.
+#   docker compose -f deploy/docker-compose.yml up -d --build
+# Dev only: CONCORD_ENV=dev, the dev JWT key, and Postgres/Redis published on localhost so
+# devtools and the drills can reach them.
+
+x-server: &server
+  image: concord-server
+  build:
+    context: ..
+    dockerfile: server/Dockerfile
+  restart: "no"
+
+x-env: &env
+  CONCORD_ENV: dev
+  CONCORD_DB_URL: jdbc:postgresql://postgres:5432/concord
+  CONCORD_DB_USER: concord
+  CONCORD_DB_PASSWORD: concord
+  CONCORD_REDIS_URL: redis://redis:6379
+  CONCORD_ALLOWED_ORIGINS: http://localhost:5173
+
+x-session: &session
+  <<: *server
+  command: ["/app/session/bin/session"]
+  stop_grace_period: 20s # graceful handover: flush, snapshot, release (SPEC §2.4)
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_started }
+
+x-gateway: &gateway
+  <<: *server
+  command: ["/app/gateway/bin/gateway"]
+  depends_on:
+    redis: { condition: service_started }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: concord
+      POSTGRES_USER: concord
+      POSTGRES_PASSWORD: concord
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "concord"]
+      interval: 1s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  migrate:
+    <<: *server
+    command: ["java", "-cp", "/app/session/lib/*", "dev.concord.common.Migrate"]
+    environment: *env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  session1:
+    <<: *session
+    environment:
+      <<: *env
+      CONCORD_INSTANCE_ID: session1
+      CONCORD_ADVERTISE: ws://session1:7000/internal
+    ports: ["7001:7000"]
+  session2:
+    <<: *session
+    environment:
+      <<: *env
+      CONCORD_INSTANCE_ID: session2
+      CONCORD_ADVERTISE: ws://session2:7000/internal
+    ports: ["7002:7000"]
+  session3:
+    <<: *session
+    environment:
+      <<: *env
+      CONCORD_INSTANCE_ID: session3
+      CONCORD_ADVERTISE: ws://session3:7000/internal
+    ports: ["7003:7000"]
+
+  gateway1:
+    <<: *gateway
+    environment:
+      <<: *env
+      CONCORD_PORT: "8080"
+    ports: ["8081:8080"]
+  gateway2:
+    <<: *gateway
+    environment:
+      <<: *env
+      CONCORD_PORT: "8080"
+    ports: ["8082:8080"]

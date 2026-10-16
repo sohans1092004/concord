@@ -164,6 +164,40 @@ describe("client-core", () => {
     expect(client.unsentEdits()).toHaveLength(0);
   });
 
+  it("INVALID_OP behind an unacknowledged op of ours is deferred, then judged again in order", async () => {
+    const { client, ws, join } = await setup();
+    join();
+    const list = client.addList("L");
+    client.addCard(list, "C");
+    const [addList, addCard] = ws().ofType("OP").map((m) => m.op as Op);
+    // The owner died between the two: the list failed, the card was judged without it.
+    ws().push({ type: "ERROR", code: "UNAVAILABLE", op_id: addList!.op_id, detail: "owner unreachable" });
+    ws().push({ type: "ERROR", code: "INVALID_OP", op_id: addCard!.op_id, detail: "placement.list_id names no list on this board" });
+    expect(client.unsentEdits()).toHaveLength(0);
+    expect(client.pendingOps()).toHaveLength(2);
+    await tick(); // the queue is resent in order
+    const resent = ws().ofType("OP").slice(2).map((m) => (m.op as Op).op_id);
+    expect(resent).toEqual([addList!.op_id, addCard!.op_id]);
+    ws().push({ type: "OP_ACK", op_id: addList!.op_id, version: 1 });
+    ws().push({ type: "ERROR", code: "INVALID_OP", op_id: addCard!.op_id, detail: "still bad" }); // now at the head: final
+    expect(client.unsentEdits().map((u) => u.op.op_id)).toEqual([addCard!.op_id]);
+  });
+
+  it("a deferred op is resent once everything ahead of it is ACKed", async () => {
+    const { client, ws, join } = await setup();
+    join();
+    const list = client.addList("L");
+    client.addCard(list, "C");
+    const [addList, addCard] = ws().ofType("OP").map((m) => m.op as Op);
+    ws().push({ type: "ERROR", code: "INVALID_OP", op_id: addCard!.op_id, detail: "judged early" });
+    expect(ws().ofType("OP")).toHaveLength(2);
+    ws().push({ type: "OP_ACK", op_id: addList!.op_id, version: 1 });
+    expect(ws().ofType("OP").map((m) => (m.op as Op).op_id)[2]).toBe(addCard!.op_id);
+    ws().push({ type: "OP_ACK", op_id: addCard!.op_id, version: 2 });
+    expect(client.unsentEdits()).toHaveLength(0);
+    expect(client.confirmedVersion).toBe(2);
+  });
+
   it("INVALID_OP and UNAUTHORIZED move the op to Unsent edits and rebuild the view", async () => {
     const { client, ws, join } = await setup();
     join();

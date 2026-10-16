@@ -12,6 +12,13 @@
 // Rejections (§7.4): CLOCK_SKEW re-stamps and resends under the same op_id; RETRY_LATER and
 // UNAVAILABLE keep the op and resend with backoff; INVALID_OP and UNAUTHORIZED move it to
 // Unsent edits. No user edit is ever silently discarded.
+//
+// Order matters, because the owner checks references (§4.2 step 4): an ADD_CARD is valid only
+// once the ADD_LIST before it in this queue has committed. So retries always resend the whole
+// queue in order, never one op on its own timer, and INVALID_OP is final only for the head of
+// the queue: an op with an unacknowledged op of ours ahead of it may have been judged before
+// its dependency committed (the owner died between them), so it is deferred and resent once
+// everything ahead of it is ACKed. If it is still invalid then, it goes to Unsent edits.
 
 import { Board, hlc as H, keys, op as O, type Hlc, type Op, type View } from "@concord/crdt";
 import { MemoryStorage, type Saved, type Storage, type Unsent } from "./storage.js";
@@ -67,8 +74,10 @@ export class SyncClient {
   private urlIndex: number;
   private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly resendTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly resendAttempts = new Map<string, number>();
+  private resendTimer: ReturnType<typeof setTimeout> | null = null;
+  private resendAttempt = 0;
+  /** Ops refused as INVALID_OP while an earlier op of ours was unacknowledged. */
+  private readonly deferred = new Set<string>();
   private syncInFlight = false;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private viewCache: Board | null = null;
@@ -268,8 +277,9 @@ export class SyncClient {
   private disconnected(): void {
     this.ws = null;
     this.syncInFlight = false;
-    for (const t of this.resendTimers.values()) clearTimeout(t);
-    this.resendTimers.clear();
+    if (this.resendTimer) clearTimeout(this.resendTimer);
+    this.resendTimer = null;
+    this.deferred.clear(); // JOINED resends the whole queue in order
     if (this.status_ === "closed" || this.status_ === "unauthorized") return;
     this.status_ = "offline";
     this.urlIndex++;
@@ -370,8 +380,17 @@ export class SyncClient {
     const i = this.pending.findIndex((p) => p.op_id === opId);
     if (i < 0) return;
     const [op] = this.pending.splice(i, 1);
-    this.clearResend(opId);
+    this.deferred.delete(opId);
+    this.resendAttempt = 0;
+    this.log("acked", { op_id: opId, version });
     this.confirmedOp(op!, version, false); // §7.3 step 6
+    // Deferred ops now at the head have everything before them committed: judge them again.
+    let k = 0;
+    while (k < this.pending.length && this.deferred.has(this.pending[k]!.op_id)) {
+      const d = this.pending[k++]!;
+      this.deferred.delete(d.op_id);
+      this.sendOp(d);
+    }
   }
 
   private requestSync(): void {
@@ -424,33 +443,31 @@ export class SyncClient {
       }
       case "RETRY_LATER":
       case "UNAVAILABLE":
-        this.scheduleResend(op.op_id);
+        this.scheduleQueueResend();
         break;
+      case "INVALID_OP":
+        if (i > 0) {
+          // An earlier op of ours is still unacknowledged: this may only be invalid without it.
+          this.deferred.add(op.op_id);
+          break;
+        }
+      // falls through: at the head of the queue, INVALID_OP is final (a client bug, logged)
       default:
-        // INVALID_OP (a client bug, logged) and UNAUTHORIZED: out of the queue, into Unsent edits.
+        // INVALID_OP and UNAUTHORIZED: out of the queue, into Unsent edits.
         this.pending.splice(i, 1);
-        this.clearResend(op.op_id);
+        this.deferred.delete(op.op_id);
         this.unsent.push({ op, code, detail, at: this.now() });
     }
   }
 
-  private scheduleResend(opId: string): void {
-    const n = (this.resendAttempts.get(opId) ?? 0) + 1;
-    this.resendAttempts.set(opId, n);
-    const old = this.resendTimers.get(opId);
-    if (old) clearTimeout(old);
-    this.resendTimers.set(opId, setTimeout(() => {
-      this.resendTimers.delete(opId);
-      const op = this.pending.find((p) => p.op_id === opId);
-      if (op) this.sendOp(op);
-    }, backoffMs(n, this.random)));
-  }
-
-  private clearResend(opId: string): void {
-    const t = this.resendTimers.get(opId);
-    if (t) clearTimeout(t);
-    this.resendTimers.delete(opId);
-    this.resendAttempts.delete(opId);
+  /** Resends the whole queue, in order, after a backoff. The server dedups by op_id (§4.3). */
+  private scheduleQueueResend(): void {
+    if (this.resendTimer) return;
+    this.resendTimer = setTimeout(() => {
+      this.resendTimer = null;
+      this.deferred.clear();
+      for (const op of this.pending) this.sendOp(op);
+    }, backoffMs(this.resendAttempt++, this.random));
   }
 
   // ---- helpers -----------------------------------------------------------------------------
@@ -526,8 +543,8 @@ export class SyncClient {
   private clearTimers(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.syncTimer) clearTimeout(this.syncTimer);
-    for (const t of this.resendTimers.values()) clearTimeout(t);
-    this.resendTimers.clear();
+    if (this.resendTimer) clearTimeout(this.resendTimer);
+    this.resendTimer = null;
   }
 
   private log(event: string, data: Record<string, unknown>): void {
