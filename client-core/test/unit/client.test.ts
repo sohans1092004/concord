@@ -1,7 +1,7 @@
 // client-core against a scripted fake gateway: every §7 path without a network.
 import { Board, hlc as H, op as O, type Op } from "@concord/crdt";
-import { describe, expect, it } from "vitest";
-import { backoffMs, MemoryStorage, SyncClient, type Socket } from "../../src/index.js";
+import { describe, expect, it, vi } from "vitest";
+import { backoffMs, JOIN_TIMEOUT_MS, MemoryStorage, SyncClient, type Socket } from "../../src/index.js";
 
 const BOARD = "b0a4d000-0000-4000-8000-000000000001";
 const T0 = 1_760_000_000_000;
@@ -239,6 +239,29 @@ describe("client-core", () => {
     expect(ws().ofType("JOIN")[0]!.since_version).toBe(4);
     ws().push({ type: "JOINED", ops: [], version: 4, server_time_ms: T0, role: "editor" });
     expect(ws().ofType("OP")).toHaveLength(1);
+  });
+
+  it("a connection that hangs before JOINED is abandoned after 10s for the next gateway", async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const client = await SyncClient.open({
+        urls: ["ws://g1/ws", "ws://g2/ws"], boardId: BOARD, token: () => "tok", random: () => 0,
+        connect: (url) => {
+          const s = new FakeSocket(url);
+          sockets.push(s);
+          return s;
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets).toHaveLength(1); // never opens, never closes
+      await vi.advanceTimersByTimeAsync(JOIN_TIMEOUT_MS + 1);
+      expect(sockets).toHaveLength(2);
+      expect(sockets[1]!.url.startsWith("ws://g2/ws?")).toBe(true);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("RECONNECT_ELSEWHERE closes and reconnects at once", async () => {

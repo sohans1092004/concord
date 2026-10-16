@@ -53,6 +53,9 @@ export interface ClientOptions {
   readonly log?: (event: string, data: Record<string, unknown>) => void;
 }
 
+/** A connection that has not reached JOINED by then is abandoned (a hung handshake or owner). */
+export const JOIN_TIMEOUT_MS = 10_000;
+
 /** SPEC §7.3 step 1: 0.5s × 2^attempt, capped at 30s, full jitter. */
 export function backoffMs(attempt: number, random: () => number): number {
   return random() * Math.min(30_000, 500 * 2 ** attempt);
@@ -74,6 +77,7 @@ export class SyncClient {
   private urlIndex: number;
   private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private joinTimer: ReturnType<typeof setTimeout> | null = null;
   private resendTimer: ReturnType<typeof setTimeout> | null = null;
   private resendAttempt = 0;
   /** Ops refused as INVALID_OP while an earlier op of ours was unacknowledged. */
@@ -259,6 +263,19 @@ export class SyncClient {
       return;
     }
     this.ws = ws;
+    // A socket can hang without ever opening or closing (a port accepted by a proxy whose
+    // backend is not up yet). Without this the client would wait forever.
+    this.joinTimer = setTimeout(() => {
+      if (this.ws !== ws || this.status_ !== "connecting") return;
+      this.log("join_timeout", { url, ms: JOIN_TIMEOUT_MS });
+      this.ws = null; // ignore whatever this socket does from now on
+      try {
+        ws.close(4000, "join timeout");
+      } catch {
+        // never opened
+      }
+      this.disconnected();
+    }, JOIN_TIMEOUT_MS);
     ws.onopen = () => this.send({ type: "JOIN", board_id: this.opts.boardId, since_version: this.version });
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
@@ -276,6 +293,8 @@ export class SyncClient {
 
   private disconnected(): void {
     this.ws = null;
+    if (this.joinTimer) clearTimeout(this.joinTimer);
+    this.joinTimer = null;
     this.syncInFlight = false;
     if (this.resendTimer) clearTimeout(this.resendTimer);
     this.resendTimer = null;
@@ -308,6 +327,8 @@ export class SyncClient {
         this.catchUp(m);
         this.status_ = "joined";
         this.attempt = 0;
+        if (this.joinTimer) clearTimeout(this.joinTimer);
+        this.joinTimer = null;
         this.log("joined", { version: this.version, pending: this.pending.length });
         for (const op of this.pending) this.send({ type: "OP", op }); // step 5: resend the queue
         break;
@@ -542,6 +563,7 @@ export class SyncClient {
 
   private clearTimers(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.joinTimer) clearTimeout(this.joinTimer);
     if (this.syncTimer) clearTimeout(this.syncTimer);
     if (this.resendTimer) clearTimeout(this.resendTimer);
     this.resendTimer = null;
