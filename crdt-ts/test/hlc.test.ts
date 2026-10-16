@@ -34,7 +34,7 @@ describe("hlc", () => {
   it("compare is a total order: antisymmetric, transitive, zero only on equal fields", () => {
     fc.assert(
       fc.property(hlcArb, hlcArb, hlcArb, (a, b, c) => {
-        expect(Math.sign(compare(a, b))).toBe(-Math.sign(compare(b, a)));
+        expect(Math.sign(compare(a, b)) + Math.sign(compare(b, a))).toBe(0);
         if (compare(a, b) <= 0 && compare(b, c) <= 0) expect(compare(a, c)).toBeLessThanOrEqual(0);
         expect(compare(a, b) === 0).toBe(JSON.stringify(encode(a)) === JSON.stringify(encode(b)));
       }),
