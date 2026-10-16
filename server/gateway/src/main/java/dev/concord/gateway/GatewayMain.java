@@ -32,7 +32,7 @@ public final class GatewayMain implements AutoCloseable {
         config.check();
         Tokens tokens = new Tokens(config.jwtSecret());
         redis = new Redis(config.redisUrl());
-        router = new Router(redis.conn.sync(), System::currentTimeMillis);
+        router = new Router(redis.conn.sync(), System::currentTimeMillis, config.internalSecret());
         fanout = new Fanout(redis.pubSub(), router);
         app = Javalin.create(cfg -> {
             cfg.useVirtualThreads = true;

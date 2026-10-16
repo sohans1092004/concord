@@ -13,13 +13,14 @@ import org.slf4j.LoggerFactory;
 /**
  * The endpoint gateways forward to: one WebSocket per gateway (SPEC §2.3 step 4), frames as in
  * {@link Msg}. Each request becomes a mailbox item; its reply goes back on the same socket.
- * Not exposed outside the internal network (Phase 4 adds mutual authentication).
+ * Gateways authenticate with a shared secret header on upgrade (amendment 8).
  */
 public final class InternalServer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(InternalServer.class);
     private final Javalin app;
 
-    public InternalServer(Boards boards, Metrics metrics, int port) {
+    public InternalServer(Boards boards, Metrics metrics, int port, String secret) {
+        byte[] expected = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         app = Javalin.create(cfg -> {
             cfg.useVirtualThreads = true;
             cfg.showJavalinBanner = false;
@@ -30,6 +31,14 @@ public final class InternalServer implements AutoCloseable {
         });
         app.get("/metrics", ctx -> ctx.contentType("application/json").result(Msg.encode(metrics.snapshot())));
         app.get("/health", ctx -> ctx.result("ok"));
+        // Only gateways holding the shared secret may open the internal socket (amendment 8).
+        app.wsBeforeUpgrade("/internal", ctx -> {
+            String got = ctx.header(dev.concord.common.Config.INTERNAL_HEADER);
+            if (got == null || !java.security.MessageDigest.isEqual(got.getBytes(java.nio.charset.StandardCharsets.UTF_8), expected)) {
+                metrics.inc("internal_auth_rejections");
+                throw new io.javalin.http.UnauthorizedResponse("bad internal secret");
+            }
+        });
         app.ws("/internal", ws -> ws.onMessage(ctx -> handle(boards, ctx, ctx.message())));
         app.start(port);
     }

@@ -47,7 +47,7 @@ public final class SessionMain implements AutoCloseable {
             }
         });
         membershipSub.sync().subscribe(RedisKeys.MEMBERSHIP_CHANNEL);
-        this.server = new InternalServer(boards, metrics, config.port());
+        this.server = new InternalServer(boards, metrics, config.port(), config.internalSecret());
         this.registry = new Registry(redis.conn.sync(), new Rendezvous.Instance(config.instanceId(), config.advertise()), System::currentTimeMillis);
         log.atInfo().addKeyValue("instance", config.instanceId()).addKeyValue("address", config.advertise()).log("session instance up");
     }

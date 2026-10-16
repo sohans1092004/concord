@@ -34,7 +34,10 @@ class SchemaTest {
         assertThrows(IllegalStateException.class,
                 () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", Config.DEV_JWT_SECRET)).check());
         assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "staging")).check());
-        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32))).check();
+        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32))).check());
+        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32),
+                "CONCORD_INTERNAL_SECRET", Config.DEV_INTERNAL_SECRET)).check());
+        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32), "CONCORD_INTERNAL_SECRET", "y".repeat(32))).check();
         assertEquals(Config.DEV_JWT_SECRET, Config.from(Map.of("CONCORD_ENV", "dev")).check().jwtSecret());
     }
 

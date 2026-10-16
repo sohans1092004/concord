@@ -22,13 +22,21 @@ public record Config(
         String advertise, // session: ws:// address gateways use to reach this instance
         int port,
         int batchMs, // group-commit window (SPEC §6.1 step 3)
-        List<String> allowedOrigins) {
+        List<String> allowedOrigins,
+        String internalSecret, // shared secret on the gateway ↔ session WebSocket (amendment 8)
+        long clientOutboxBytes) { // per-connection unsent bytes before the gateway drops a client
 
     /**
      * The well-known dev signing key. Dev tokens (devtools) are signed only with this, and a
      * non-dev server refuses to start with it, so a dev token can never validate in prod.
      */
     public static final String DEV_JWT_SECRET = "concord-dev-only-secret-never-use-in-prod-000";
+
+    /** The dev internal secret; refused outside dev like the dev JWT key. */
+    public static final String DEV_INTERNAL_SECRET = "concord-dev-only-internal-secret-0000000";
+
+    /** HTTP header carrying the internal secret on the gateway's upgrade to /internal. */
+    public static final String INTERNAL_HEADER = "X-Concord-Internal";
 
     public static Config fromEnv() {
         return from(System.getenv());
@@ -49,7 +57,9 @@ public record Config(
                 Integer.parseInt(e.getOrDefault("CONCORD_PORT", "7000")),
                 Integer.parseInt(e.getOrDefault("CONCORD_BATCH_MS", "15")),
                 Arrays.stream(e.getOrDefault("CONCORD_ALLOWED_ORIGINS", "http://localhost:5173").split(","))
-                        .map(String::trim).filter(s -> !s.isEmpty()).toList());
+                        .map(String::trim).filter(s -> !s.isEmpty()).toList(),
+                e.getOrDefault("CONCORD_INTERNAL_SECRET", env.equals("dev") ? DEV_INTERNAL_SECRET : ""),
+                Long.parseLong(e.getOrDefault("CONCORD_CLIENT_OUTBOX_BYTES", Long.toString(8L << 20))));
     }
 
     public boolean dev() {
@@ -64,8 +74,11 @@ public record Config(
                 throw new IllegalStateException("CONCORD_JWT_SECRET must be at least 32 bytes outside dev");
             if (jwtSecret.equals(DEV_JWT_SECRET))
                 throw new IllegalStateException("the dev JWT secret is refused outside dev");
+            if (internalSecret.getBytes(StandardCharsets.UTF_8).length < 32 || internalSecret.equals(DEV_INTERNAL_SECRET))
+                throw new IllegalStateException("CONCORD_INTERNAL_SECRET must be at least 32 bytes, and not the dev one, outside dev");
         }
         if (batchMs < 0) throw new IllegalStateException("CONCORD_BATCH_MS must be >= 0");
+        if (clientOutboxBytes < 64 * 1024) throw new IllegalStateException("CONCORD_CLIENT_OUTBOX_BYTES must be at least 64 KB");
         return this;
     }
 }

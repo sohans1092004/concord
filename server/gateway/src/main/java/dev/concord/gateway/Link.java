@@ -37,9 +37,11 @@ final class Link implements WebSocket.Listener {
     }
 
     /** Opens a link; fails if the instance is unreachable. */
-    static CompletableFuture<Link> open(HttpClient http, String address) {
+    static CompletableFuture<Link> open(HttpClient http, String address, String secret) {
         Link l = new Link(address);
-        return http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(2)).buildAsync(URI.create(address), l)
+        return http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(2))
+                .header(dev.concord.common.Config.INTERNAL_HEADER, secret)
+                .buildAsync(URI.create(address), l)
                 .thenApply(ws -> {
                     l.ws = ws;
                     return l;

@@ -36,8 +36,11 @@ final class Router {
     private final Map<String, CompletableFuture<Link>> links = new ConcurrentHashMap<>();
     private volatile List<Rendezvous.Instance> lastLive = List.of();
 
-    Router(RedisCommands<String, String> redis, LongSupplier clock) {
+    private final String secret;
+
+    Router(RedisCommands<String, String> redis, LongSupplier clock, String secret) {
         this.redis = redis;
+        this.secret = secret;
         this.clock = clock;
     }
 
@@ -110,7 +113,7 @@ final class Router {
 
     private CompletableFuture<Link> link(String address) {
         CompletableFuture<Link> f = links.compute(address, (a, cur) ->
-                cur == null || (cur.isDone() && (cur.isCompletedExceptionally() || !cur.join().open())) ? Link.open(http, a) : cur);
+                cur == null || (cur.isDone() && (cur.isCompletedExceptionally() || !cur.join().open())) ? Link.open(http, a, secret) : cur);
         return f.whenComplete((l, e) -> {
             if (e != null) {
                 links.remove(address, f);
