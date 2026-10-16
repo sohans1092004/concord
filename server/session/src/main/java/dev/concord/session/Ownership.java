@@ -70,8 +70,10 @@ public final class Ownership {
     private final Store store;
     private final String instance;
     private final String address;
+    private final Metrics metrics;
 
-    public Ownership(RedisCommands<String, String> redis, Store store, String instance, String address) {
+    public Ownership(RedisCommands<String, String> redis, Store store, String instance, String address, Metrics metrics) {
+        this.metrics = metrics;
         this.redis = redis;
         this.store = store;
         this.instance = instance;
@@ -99,7 +101,9 @@ public final class Ownership {
             String ok = redis.set(RedisKeys.lease(board), leaseValue(fence), SetArgs.Builder.nx().px(RedisKeys.LEASE_MS));
             if (!"OK".equals(ok)) throw new NotOwner("lease taken");
             if (store.raiseFence(board, fence)) return fence;
-            // A higher fence reached Postgres between our read and our raise: retry.
+            // Postgres already holds a fence this high: a racing claim, or a counter that did
+            // not rebuild from boards.fence. Retry; the wipe-redis drill asserts this stays 0.
+            metrics.inc("claim_fence_retries");
             release(board, fence);
         }
         throw new NotOwner("fence kept moving");

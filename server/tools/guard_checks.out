@@ -10,3 +10,10 @@ dedup-backstop: removed commit step 3.1, dropping op_ids already in board_ops (t
 dedup-lru: removed the LRU lookup (SPEC §4.3 step 1)
   test lruAnswersResendsWithoutTheDatabase: FAILED without the guard (org.opentest4j.AssertionFailedError: expected OP_ACK, got {type=ERROR, code=RETRY_LATER, op_id=913f876f-71ba-40bf-a27a-b237eb39bf27, detail=storage unavailable} ==> expected: <OP_ACK> but was: <ERROR>); PASSED with it restored
 exit 0
+
+command: cd server && python tools/guard_checks.py fence-counter-rebuild fence-check-e2e   (2026-10-16T21:51:11Z, compose stack up)
+fence-counter-rebuild: removed the boards.fence floor in the fence Lua script (SPEC §6.2 step 1): after a wipe, INCR restarts at 1
+  test drill:wipe-redis: FAILED without the guard (AssertionError: the counter rebuilt from boards.fence, without a retry: expected 1 to be +0 // Object.is equality); PASSED with it restored
+fence-check-e2e: removed the fence condition in the commit UPDATE, end to end with the stale owner cut off from Redis
+  test drill:pause-owner-no-redis: FAILED without the guard (AssertionError: rejected by the Postgres fence: expected 0 to be greater than 0); PASSED with it restored
+exit 0

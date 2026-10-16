@@ -1,0 +1,5 @@
+[
+  {"name": "redis-session1", "listen": "0.0.0.0:6381", "upstream": "redis:6379", "enabled": true},
+  {"name": "redis-session2", "listen": "0.0.0.0:6382", "upstream": "redis:6379", "enabled": true},
+  {"name": "redis-session3", "listen": "0.0.0.0:6383", "upstream": "redis:6379", "enabled": true}
+]

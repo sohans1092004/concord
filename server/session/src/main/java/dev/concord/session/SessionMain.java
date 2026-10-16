@@ -36,7 +36,7 @@ public final class SessionMain implements AutoCloseable {
         this.pool = store.dataSource() instanceof HikariDataSource h ? h : null;
         this.redis = new Redis(config.redisUrl());
         Membership membership = new Membership(store, System::currentTimeMillis);
-        Ownership ownership = new Ownership(redis.conn.sync(), store, config.instanceId(), config.advertise());
+        Ownership ownership = new Ownership(redis.conn.sync(), store, config.instanceId(), config.advertise(), metrics);
         this.boards = new Boards(new BoardActor.Deps(store, ownership, membership, Publisher.redis(redis.conn.async()),
                 metrics, System::currentTimeMillis, config.batchMs()));
         membershipSub = redis.pubSub();

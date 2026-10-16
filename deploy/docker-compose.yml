@@ -1,7 +1,9 @@
 # The Phase 2 stack (SPEC §10): 2 gateways, 3 Session instances, Postgres 16, Redis 7.
 #   docker compose -f deploy/docker-compose.yml up -d --build
 # Dev only: CONCORD_ENV=dev, the dev JWT key, and Postgres/Redis published on localhost so
-# devtools and the drills can reach them.
+# devtools and the drills can reach them. Each Session instance reaches Redis through its own
+# Toxiproxy route (redis-session1..3), so a drill can cut Redis for one instance only;
+# gateways reach Redis directly.
 
 x-server: &server
   image: concord-server
@@ -25,6 +27,7 @@ x-session: &session
   depends_on:
     migrate: { condition: service_completed_successfully }
     redis: { condition: service_started }
+    toxiproxy: { condition: service_started }
 
 x-gateway: &gateway
   <<: *server
@@ -49,6 +52,12 @@ services:
     image: redis:7-alpine
     ports: ["6379:6379"]
 
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes: ["./toxiproxy.json:/config/toxiproxy.json:ro"]
+    ports: ["8474:8474"] # control API, for drills
+
   migrate:
     <<: *server
     command: ["java", "-cp", "/app/session/lib/*", "dev.concord.common.Migrate"]
@@ -62,6 +71,7 @@ services:
       <<: *env
       CONCORD_INSTANCE_ID: session1
       CONCORD_ADVERTISE: ws://session1:7000/internal
+      CONCORD_REDIS_URL: redis://toxiproxy:6381
     ports: ["7001:7000"]
   session2:
     <<: *session
@@ -69,6 +79,7 @@ services:
       <<: *env
       CONCORD_INSTANCE_ID: session2
       CONCORD_ADVERTISE: ws://session2:7000/internal
+      CONCORD_REDIS_URL: redis://toxiproxy:6382
     ports: ["7002:7000"]
   session3:
     <<: *session
@@ -76,6 +87,7 @@ services:
       <<: *env
       CONCORD_INSTANCE_ID: session3
       CONCORD_ADVERTISE: ws://session3:7000/internal
+      CONCORD_REDIS_URL: redis://toxiproxy:6383
     ports: ["7003:7000"]
 
   gateway1:

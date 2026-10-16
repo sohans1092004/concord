@@ -27,6 +27,22 @@ export function ownerOf(board: string): Owner | null {
   return raw ? (JSON.parse(raw) as Owner) : null;
 }
 
+/** A Session instance's /metrics (compose publishes session1..3 on 7001..7003). */
+export async function metricsOf(instance: string): Promise<Record<string, number>> {
+  const port = 7000 + Number(instance.replace("session", ""));
+  return (await (await fetch(`http://localhost:${port}/metrics`)).json()) as Record<string, number>;
+}
+
+/** Cuts (or restores) one Session instance's route to Redis, via the compose Toxiproxy. */
+export async function redisRoute(instance: string, enabled: boolean): Promise<void> {
+  const r = await fetch(`http://localhost:8474/proxies/redis-${instance}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!r.ok) throw new Error(`toxiproxy: ${r.status} ${await r.text()}`);
+}
+
 export function boardVersion(board: string): number {
   return Number(psql(`SELECT version FROM boards WHERE id = '${board}'`)[0]);
 }
