@@ -1,0 +1,12 @@
+{
+  "name": "concord-differential",
+  "private": true,
+  "type": "module",
+  "description": "Differential fuzz: crdt-ts and crdt-java must agree on state, view, validation and canonical bytes.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "3.2.7"
+  }
+}

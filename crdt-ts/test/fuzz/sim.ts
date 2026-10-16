@@ -330,3 +330,8 @@ export function minimize(ops: readonly Op[], orders: readonly number[]): Op[] {
   }
   return cur;
 }
+
+/** `n` scenarios drawn deterministically from `seed` (for harnesses without their own fast-check). */
+export function sampleScenarios(n: number, seed: number, minSteps = 50, maxSteps = 500, sameGap?: boolean): Scenario[] {
+  return fc.sample(scenarioArb(minSteps, maxSteps, sameGap), { numRuns: n, seed });
+}
