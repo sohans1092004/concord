@@ -42,6 +42,8 @@ public final class BoardActor {
     static final long SNAPSHOT_EVERY_MS = 60_000;
     static final int CATCH_UP_LIMIT = 2_000; // SPEC §7.3 step 3
     static final int REBALANCE_AT = 40; // SPEC §3.7
+    /** Requests queued for one board before new ones get RETRY_LATER (amendment 9). */
+    static final int MAILBOX_LIMIT = 5_000;
     /** board_ops.user_id for ops the owner itself issues (rebalancing). */
     static final String SYSTEM_USER = Op.NIL_UUID;
 
@@ -134,12 +136,20 @@ public final class BoardActor {
         return state;
     }
 
-    /** False once the actor has closed: the caller must route the item elsewhere. */
-    public boolean offer(Item item) {
+    public enum Offered { ACCEPTED, FULL, CLOSED }
+
+    /**
+     * CLOSED once the actor has closed: the caller must route the item elsewhere. FULL when the
+     * mailbox holds MAILBOX_LIMIT requests: the caller answers RETRY_LATER. Drop and Release
+     * are always accepted, so an overloaded board can still be shed or handed over.
+     */
+    public Offered offer(Item item) {
         synchronized (closeLock) {
-            if (state == State.CLOSED) return false;
+            if (state == State.CLOSED) return Offered.CLOSED;
+            boolean control = item instanceof Drop || item instanceof Release;
+            if (!control && mailbox.size() >= MAILBOX_LIMIT) return Offered.FULL;
             mailbox.add(item);
-            return true;
+            return Offered.ACCEPTED;
         }
     }
 
@@ -624,7 +634,7 @@ public final class BoardActor {
     /** Canonical state and version, read on the actor thread. For tests and drills. */
     public CompletableFuture<Map<String, Object>> inspect() {
         CompletableFuture<Map<String, Object>> f = new CompletableFuture<>();
-        if (!offer(new Ensure(m -> f.complete(Msg.obj("version", version, "state", board.canonical(), "reply", m)))))
+        if (offer(new Ensure(m -> f.complete(Msg.obj("version", version, "state", board.canonical(), "reply", m)))) != Offered.ACCEPTED)
             f.completeExceptionally(new IllegalStateException("closed"));
         return f;
     }

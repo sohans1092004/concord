@@ -116,6 +116,16 @@ block on each other; a slow board cannot stall another. Time spent waiting for a
 connection counts toward the 2s commit timeout (§6.1 step 5); pool sizing is measured in
 Phase 4.
 
+Every queue is bounded, so no slow peer can grow a process's memory without limit:
+
+| Queue | Bound | When full |
+|---|---|---|
+| Board actor mailbox | 5,000 requests (`Drop` and `Release` always accepted) | the request gets `RETRY_LATER` |
+| Gateway → client, unsent bytes per connection | 8 MB (`CONCORD_CLIENT_OUTBOX_BYTES`) | the gateway sends `RECONNECT_ELSEWHERE`, closes, and cuts the connection after 1s; the client reconnects and catches up by version (§7.3) |
+| Gateway, requests waiting per connection | 256 | the request gets `RETRY_LATER` |
+| Owner → gateway, unsent bytes per gateway | 64 MB | the owner cuts that gateway's socket; its pending requests fail with `UNAVAILABLE` and clients retry |
+| Redis commands queued in a process | 10,000 | the command fails; a lost publish is a version gap (§6.4) |
+
 ### 2.3 Assignment and routing
 
 1. Live Session instances register in Redis: `instances` sorted set, score = last heartbeat,
@@ -911,3 +921,4 @@ section text itself is updated in the same commit.
 | 6 | 2026-10-16 | §2.2, §4.2, §6.1, §6.2 | (A) Claim order: atomic floor-and-INCR, lease, then `UPDATE boards SET fence … WHERE fence < :fence` before loading; commits require `fence = :fence`. (B) After a failed or timed-out commit the actor reconciles from `board_ops` under the board row lock before serving, answering `RETRY_LATER` and taking no snapshots meanwhile. (D) One writer per board actor over a shared pool; pool wait counts toward the 2s timeout. (E) Admission rules: ADD of an existing ID, references of the right kind, list fields and placement form; server-only, merge still accepts any order; dedup by `board_ops` before any rejection. |
 | 7 | 2026-10-16 | §5.2, §9.4 | (F) The per-connection token bucket lives in the gateway's memory; the `rl:{connection}` Redis key is removed. |
 | 8 | 2026-10-17 | §5.2, §6.2, §9.4 | Claim order confirmed: floor-and-INCR → `SET NX` lease → `UPDATE boards SET fence` → load → serve (already the §6.2 text). The `membership` invalidation channel added to §5.2. The internal gateway ↔ owner socket requires a shared-secret header (`CONCORD_INTERNAL_SECRET`). |
+| 9 | 2026-10-17 | §2.2 | Every queue is bounded: actor mailbox (5,000; then `RETRY_LATER`), gateway → client unsent bytes (8 MB; then `RECONNECT_ELSEWHERE` and close), gateway requests per connection (256), owner → gateway unsent bytes (64 MB; then the socket is cut), Redis command queue (10,000). |

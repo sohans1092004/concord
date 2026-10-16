@@ -37,13 +37,26 @@ public final class Boards implements AutoCloseable {
                 return;
             }
             BoardActor a = actors.computeIfAbsent(board, b -> BoardActor.start(b, deps, () -> actors.remove(b)));
-            if (a.offer(item)) return;
-            actors.remove(board, a); // closed between lookup and offer: try a fresh one
+            switch (a.offer(item)) {
+                case ACCEPTED -> {
+                    return;
+                }
+                case FULL -> {
+                    deps.metrics().inc("mailbox_full");
+                    refuse(item, Msg.RETRY_LATER, "board is overloaded");
+                    return;
+                }
+                case CLOSED -> actors.remove(board, a); // closed between lookup and offer: try a fresh one
+            }
         }
         refuse(item);
     }
 
     private static void refuse(BoardActor.Item item) {
+        refuse(item, Msg.NOT_OWNER, "this instance is not serving the board");
+    }
+
+    private static void refuse(BoardActor.Item item, String code, String detail) {
         BoardActor.Reply r = switch (item) {
             case BoardActor.Submit s -> s.reply();
             case BoardActor.Join j -> j.reply();
@@ -52,8 +65,8 @@ public final class Boards implements AutoCloseable {
             case BoardActor.Ensure e -> e.reply();
             default -> null;
         };
-        if (r != null) r.send(Msg.error(Msg.NOT_OWNER, item instanceof BoardActor.Submit s && s.op() instanceof Map<?, ?> m
-                && m.get("op_id") instanceof String x ? x : null, "this instance is not serving the board"));
+        if (r != null) r.send(Msg.error(code, item instanceof BoardActor.Submit s && s.op() instanceof Map<?, ?> m
+                && m.get("op_id") instanceof String x ? x : null, detail));
     }
 
     public BoardActor actor(String board) {
@@ -85,7 +98,7 @@ public final class Boards implements AutoCloseable {
         renewer.shutdownNow();
         List<CompletableFuture<Void>> done = actors.values().stream().map(a -> {
             CompletableFuture<Void> f = new CompletableFuture<>();
-            if (!a.offer(new BoardActor.Release(f))) f.complete(null);
+            if (a.offer(new BoardActor.Release(f)) != BoardActor.Offered.ACCEPTED) f.complete(null);
             return f;
         }).toList();
         try {

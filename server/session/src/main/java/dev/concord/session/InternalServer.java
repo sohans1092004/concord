@@ -1,6 +1,7 @@
 package dev.concord.session;
 
 import dev.concord.common.Msg;
+import dev.concord.common.Outbox;
 import dev.concord.crdt.Hlc;
 import dev.concord.crdt.Json;
 import io.javalin.Javalin;
@@ -18,6 +19,13 @@ import org.slf4j.LoggerFactory;
 public final class InternalServer implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(InternalServer.class);
     private final Javalin app;
+    /**
+     * Bytes a gateway may leave unread before it is disconnected (amendment 9). Replies and
+     * catch-ups only; an actor never blocks on a gateway. Its pending requests then fail with
+     * UNAVAILABLE at the gateway, and clients retry.
+     */
+    static final long GATEWAY_OUTBOX_BYTES = 64L << 20;
+    private final java.util.Map<String, Outbox> outboxes = new java.util.concurrent.ConcurrentHashMap<>();
 
     public InternalServer(Boards boards, Metrics metrics, int port, String secret) {
         byte[] expected = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -39,7 +47,14 @@ public final class InternalServer implements AutoCloseable {
                 throw new io.javalin.http.UnauthorizedResponse("bad internal secret");
             }
         });
-        app.ws("/internal", ws -> ws.onMessage(ctx -> handle(boards, ctx, ctx.message())));
+        app.ws("/internal", ws -> {
+            ws.onConnect(ctx -> outboxes.put(ctx.sessionId(), new Outbox(ctx.session, GATEWAY_OUTBOX_BYTES, null, () -> {
+                metrics.inc("gateway_slow_consumer_closes");
+                log.warn("a gateway stopped reading: backlog over the limit, disconnecting it");
+            }, metrics.peak("gateway_outbox_peak_bytes"))));
+            ws.onClose(ctx -> outboxes.remove(ctx.sessionId()));
+            ws.onMessage(ctx -> handle(boards, ctx, ctx.message(), outboxes.get(ctx.sessionId())));
+        });
         app.start(port);
     }
 
@@ -47,7 +62,7 @@ public final class InternalServer implements AutoCloseable {
         return app.port();
     }
 
-    private static void handle(Boards boards, WsContext ctx, String text) {
+    private static void handle(Boards boards, WsContext ctx, String text, Outbox outbox) {
         Map<?, ?> f;
         try {
             f = (Map<?, ?>) Json.parse(text);
@@ -57,7 +72,7 @@ public final class InternalServer implements AutoCloseable {
         }
         Object req = f.get("req");
         String board = f.get("board_id") instanceof String b && Hlc.isUuid(b) ? b : null;
-        BoardActor.Reply reply = msg -> send(ctx, Msg.encode(Msg.obj("k", "R", "req", req, "msg", msg)));
+        BoardActor.Reply reply = msg -> outbox.send(Msg.encode(Msg.obj("k", "R", "req", req, "msg", msg)));
         if (board == null) {
             reply.send(Msg.error(Msg.INVALID_OP, null, "board_id is not a lowercase canonical UUID"));
             return;
@@ -74,19 +89,6 @@ public final class InternalServer implements AutoCloseable {
         };
         if (item == null) reply.send(Msg.error(Msg.INVALID_OP, null, "unknown frame"));
         else boards.dispatch(board, item);
-    }
-
-    /** Jetty allows one blocking send at a time per session; actors reply from many threads. */
-    private static void send(WsContext ctx, String text) {
-        synchronized (ctx.session) {
-            if (ctx.session.isOpen()) {
-                try {
-                    ctx.send(text);
-                } catch (RuntimeException e) {
-                    log.debug("reply dropped, gateway gone: {}", e.toString());
-                }
-            }
-        }
     }
 
     @Override

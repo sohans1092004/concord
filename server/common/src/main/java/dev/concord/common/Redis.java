@@ -24,6 +24,9 @@ public final class Redis implements AutoCloseable {
         client.setOptions(ClientOptions.builder()
                 .autoReconnect(true)
                 .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                // Bounded (amendment 9): a slow Redis fails publishes (version gaps) instead of
+                // queueing them in this process without limit.
+                .requestQueueSize(10_000)
                 .timeoutOptions(TimeoutOptions.enabled(Duration.ofSeconds(1)))
                 .build());
         conn = connectWithRetry();

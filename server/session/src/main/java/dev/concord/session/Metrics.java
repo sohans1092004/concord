@@ -17,6 +17,11 @@ public final class Metrics {
         counters.computeIfAbsent(name, k -> new AtomicLong()).addAndGet(n);
     }
 
+    /** A counter used as a high-water mark (see Outbox). */
+    public AtomicLong peak(String name) {
+        return counters.computeIfAbsent(name, k -> new AtomicLong());
+    }
+
     public long get(String name) {
         AtomicLong a = counters.get(name);
         return a == null ? 0 : a.get();

@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.LongSupplier;
-import org.eclipse.jetty.websocket.api.WriteCallback;
+import dev.concord.common.Outbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,11 +33,16 @@ final class ClientConn {
     private final Fanout fanout;
     private final LongSupplier clock;
     private final TokenBucket bucket;
-    private final BlockingQueue<Map<?, ?>> inbox = new LinkedBlockingQueue<>();
+    /** Requests waiting for this connection's forwarder; bounded (amendment 9). */
+    static final int INBOX_LIMIT = 256;
+
+    private final BlockingQueue<Map<?, ?>> inbox = new LinkedBlockingQueue<>(INBOX_LIMIT);
+    private final Outbox outbox;
     private final Thread worker;
     private volatile String board;
 
-    ClientConn(String userId, WsContext ctx, Router router, Fanout fanout, LongSupplier clock) {
+    ClientConn(String userId, WsContext ctx, Router router, Fanout fanout, LongSupplier clock, Outbox outbox) {
+        this.outbox = outbox;
         this.userId = userId;
         this.ctx = ctx;
         this.router = router;
@@ -63,13 +68,13 @@ final class ClientConn {
         }
     }
 
-    /** Non-blocking send: a slow client never holds up delivery to others. */
+    /**
+     * Non-blocking and bounded: a slow client never holds up delivery to others, and one that
+     * stops reading is disconnected with RECONNECT_ELSEWHERE once its backlog passes the limit;
+     * it catches up by version when it reconnects (§7.3).
+     */
     void send(String text) {
-        try {
-            if (ctx.session.isOpen()) ctx.session.getRemote().sendString(text, WriteCallback.NOOP);
-        } catch (RuntimeException e) {
-            log.debug("send to client failed: {}", e.toString());
-        }
+        outbox.send(text);
     }
 
     void send(Map<String, Object> msg) {
@@ -85,11 +90,13 @@ final class ClientConn {
             return;
         }
         switch (String.valueOf(f.get("type"))) {
-            case "JOIN", "SYNC_REQUEST" -> inbox.add(f);
+            case "JOIN", "SYNC_REQUEST" -> {
+                if (!inbox.offer(f)) send(Msg.error(Msg.RETRY_LATER, null, "too many requests in flight"));
+            }
             case "OP" -> {
                 // Rate limit on arrival, so a flood is refused at once rather than queued.
-                if (bucket.take(clock.getAsLong())) inbox.add(f);
-                else send(Msg.error(Msg.RETRY_LATER, opIdOf(f), "rate limited: 20 ops/s, burst 50"));
+                if (!bucket.take(clock.getAsLong())) send(Msg.error(Msg.RETRY_LATER, opIdOf(f), "rate limited: 20 ops/s, burst 50"));
+                else if (!inbox.offer(f)) send(Msg.error(Msg.RETRY_LATER, opIdOf(f), "too many requests in flight"));
             }
             case "PRESENCE" -> {} // Phase 3
             default -> send(Msg.error(Msg.INVALID_OP, null, "unknown message type"));

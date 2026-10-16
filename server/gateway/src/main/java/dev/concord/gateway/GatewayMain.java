@@ -2,6 +2,7 @@ package dev.concord.gateway;
 
 import dev.concord.common.Config;
 import dev.concord.common.Msg;
+import dev.concord.common.Outbox;
 import dev.concord.common.Redis;
 import dev.concord.common.Tokens;
 import io.javalin.Javalin;
@@ -27,6 +28,9 @@ public final class GatewayMain implements AutoCloseable {
     private final Fanout fanout;
     private final Javalin app;
     private final Map<String, ClientConn> conns = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong slowConsumerCloses = new java.util.concurrent.atomic.AtomicLong();
+    /** Largest backlog any one client connection reached, in bytes. */
+    final java.util.concurrent.atomic.AtomicLong outboxPeak = new java.util.concurrent.atomic.AtomicLong();
 
     public GatewayMain(Config config) {
         config.check();
@@ -46,7 +50,9 @@ public final class GatewayMain implements AutoCloseable {
         });
         app.get("/health", ctx -> ctx.result("ok"));
         app.get("/metrics", ctx -> ctx.contentType("application/json")
-                .result(Msg.encode(Msg.obj("connections", (long) conns.size(), "clients_on_boards", (long) fanout.clientCount()))));
+                .result(Msg.encode(Msg.obj("connections", (long) conns.size(), "clients_on_boards", (long) fanout.clientCount(),
+                        "slow_consumer_closes", slowConsumerCloses.get(), "outbox_peak_bytes", outboxPeak.get(),
+                        "outbox_limit_bytes", config.clientOutboxBytes()))));
         // SPEC §9.4: Origin allowlist (cross-site WebSocket hijacking) and JWT, before upgrading.
         // Browsers always send Origin; a client without one (a script) still needs a token.
         app.wsBeforeUpgrade("/ws", ctx -> {
@@ -61,7 +67,11 @@ public final class GatewayMain implements AutoCloseable {
                     ctx.closeSession(4401, "unauthorized");
                     return;
                 }
-                conns.put(ctx.sessionId(), new ClientConn(user, ctx, router, fanout, System::currentTimeMillis));
+                Outbox outbox = new Outbox(ctx.session, config.clientOutboxBytes(), Msg.encode(Msg.obj("type", "RECONNECT_ELSEWHERE")), () -> {
+                    slowConsumerCloses.incrementAndGet();
+                    log.atWarn().addKeyValue("user_id", user).log("slow consumer: backlog over the limit, disconnecting");
+                }, outboxPeak);
+                conns.put(ctx.sessionId(), new ClientConn(user, ctx, router, fanout, System::currentTimeMillis, outbox));
                 log.atInfo().addKeyValue("user_id", user).log("client connected");
             });
             ws.onMessage(ctx -> {
