@@ -61,12 +61,12 @@ class FencingTest {
             a.boards.dispatch(h.board, new BoardActor.Submit(stale, h.owner, h.probe.reply()));
             assertTrue(paused.await(10, TimeUnit.SECONDS));
 
-            // A's lease expires; B claims (fence, lease, fence in Postgres, then load).
+            // A's lease expires; B claims and loads, but has not committed anything yet. This is
+            // the window in which v3's claim order lost ops: Postgres still held A's fence.
             redis.conn.sync().del(RedisKeys.lease(h.board), RedisKeys.owner(h.board));
             try (SessionMain b = Harness.start("s-b-" + Ops.uuid(), Store::new, false)) {
-                var fromB = h.ops.addCard(Ops.uuid(), list, "a2", "acked by B");
-                assertEquals("OP_ACK", h.submit(b, fromB, h.owner).get("type"));
-                acked.add(fromB);
+                b.boards.dispatch(h.board, new BoardActor.Ensure(h.probe.reply()));
+                assertEquals("OK", h.probe.next().get("type"));
                 long fenceB = b.boards.actor(h.board).fence();
                 assertTrue(fenceB > fenceA, "B's fence " + fenceB + " must exceed A's " + fenceA);
 
@@ -75,6 +75,10 @@ class FencingTest {
                 Map<String, Object> r = h.probe.next();
                 assertEquals("ERROR", r.get("type"), () -> "stale owner ACKed: " + r);
                 assertEquals(Msg.NOT_OWNER, r.get("code"));
+
+                var fromB = h.ops.addCard(Ops.uuid(), list, "a2", "acked by B");
+                assertEquals("OP_ACK", h.submit(b, fromB, h.owner).get("type"));
+                acked.add(fromB);
                 assertEquals(0, Seed.count(h.db, "SELECT count(*) FROM board_ops WHERE board_id = ? AND op_id = ?",
                         java.util.UUID.fromString(h.board), java.util.UUID.fromString((String) stale.get("op_id"))));
                 Thread.sleep(200);

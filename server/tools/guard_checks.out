@@ -1,0 +1,12 @@
+command: cd server && python tools/guard_checks.py   (2026-10-16T17:30:50Z, commit e5ce262 + uncommitted gateway/tools)
+fence-check: removed the fence condition in the commit UPDATE (SPEC §6.1 step 3.2)
+  test staleOwnerCannotCommitAfterANewOwnerClaims: FAILED without the guard (org.opentest4j.AssertionFailedError: stale owner ACKed: {type=OP_ACK, op_id=11d370ba-75c1-44c9-82dd-422d2762786d, version=3} ==> expected: <ERROR> but was: <OP_ACK>); PASSED with it restored
+old-claim-order: removed claim step 3 (fence written before load), with v3's `fence <= :fence` commit condition
+  test staleOwnerCannotCommitAfterANewOwnerClaims: FAILED without the guard (org.opentest4j.AssertionFailedError: stale owner ACKed: {type=OP_ACK, op_id=46839a62-4f37-4250-adb9-47d41d9674a5, version=3} ==> expected: <ERROR> but was: <OP_ACK>); PASSED with it restored
+apply-after-commit: removed apply-after-commit: ops are applied to memory before the transaction (v2's order)
+  test noAckBeforeCommit: FAILED without the guard (org.opentest4j.AssertionFailedError: memory must not change ==> expected: <{"cards":{"adds":{},"tombstones":{}},"lists":{"adds":{"75621eb4-e449-47c7-9ba0-f09f986a51ea":["e7a16d1c-3f14-417d-bfb9-64717f); PASSED with it restored
+dedup-backstop: removed commit step 3.1, dropping op_ids already in board_ops (the backstop behind the LRU)
+  test dedupReturnsTheOriginalAckAndNeverRebroadcasts: FAILED without the guard (org.opentest4j.AssertionFailedError: expected OP_ACK, got {type=ERROR, code=RETRY_LATER, op_id=80bd53f3-deac-4d00-ae31-77024517437b, detail=commit failed} ==> expected: <OP_ACK> but was: <ERROR>); PASSED with it restored
+dedup-lru: removed the LRU lookup (SPEC §4.3 step 1)
+  test lruAnswersResendsWithoutTheDatabase: FAILED without the guard (org.opentest4j.AssertionFailedError: expected OP_ACK, got {type=ERROR, code=RETRY_LATER, op_id=913f876f-71ba-40bf-a27a-b237eb39bf27, detail=storage unavailable} ==> expected: <OP_ACK> but was: <ERROR>); PASSED with it restored
+exit 0

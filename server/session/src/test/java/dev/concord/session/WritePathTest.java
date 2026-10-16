@@ -126,6 +126,22 @@ class WritePathTest {
         }
     }
 
+    /** §4.3 step 1: a resend the LRU knows is answered from memory, even with Postgres unreachable. */
+    @Test
+    void lruAnswersResendsWithoutTheDatabase() throws Exception {
+        var proxy = Infra.pgProxy();
+        try (Harness h = new Harness(Store::new, true)) {
+            var list = h.ops.addList(Ops.uuid(), "a0", "L");
+            assertEquals(1, ack(list, h.submit(list)));
+            proxy.disable(); // Postgres unreachable from this instance
+            try {
+                assertEquals(1, ack(list, h.submit(list)));
+            } finally {
+                proxy.enable();
+            }
+        }
+    }
+
     /** §4.2 and §8 row 12: malformed or malicious ops are rejected before persist. */
     @Test
     void rejectsInvalidOpsBeforePersist() throws Exception {
