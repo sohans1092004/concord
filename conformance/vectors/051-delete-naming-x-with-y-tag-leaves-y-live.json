@@ -1,0 +1,196 @@
+{
+  "name": "051-delete-naming-x-with-y-tag-leaves-y-live",
+  "rule": "§3.2",
+  "description": "A buggy DELETE_CARD names C1 but lists C2's tag O(3). Tombstones are per entity, so it only tombstones the pair (C1, O(3)), which matches no add of C1: both cards stay live.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "Card"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000002",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a1"
+      },
+      "title": "Other"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000004",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000003,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "DELETE_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "observed_tags": [
+        "0e000000-0000-4000-8000-000000000003"
+      ]
+    }
+  ],
+  "expected_rejected": {},
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "Card"
+          },
+          {
+            "id": "cc000000-0000-4000-8000-000000000002",
+            "position_key": "a1",
+            "title": "Other"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ],
+        "cc000000-0000-4000-8000-000000000002": [
+          "0e000000-0000-4000-8000-000000000003"
+        ]
+      },
+      "tombstones": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000003"
+        ]
+      }
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": {}
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Card"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000002": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000002,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Other"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000002,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a1"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "e0c8438ae715e88f1e29060c647d2efac1c0d0665d609dbeadae715a18b1577e"
+}

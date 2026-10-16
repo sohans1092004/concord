@@ -1,0 +1,150 @@
+{
+  "name": "052-delete-list-with-a-card-tag-touches-neither",
+  "rule": "§3.2",
+  "description": "A DELETE_LIST for L1 lists the tag of card C1's add. Lists and cards are separate OR-Sets and tombstones are per entity, so L1 and C1 both stay live.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "Card"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "DELETE_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "observed_tags": [
+        "0e000000-0000-4000-8000-000000000002"
+      ]
+    }
+  ],
+  "expected_rejected": {},
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "Card"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ]
+      },
+      "tombstones": {}
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ]
+      }
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Card"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "a387aba0f7cb0281d78469b6676c72ff8a7449649a9fc31ca48a52db9b209389"
+}

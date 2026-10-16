@@ -9,11 +9,11 @@
           "0e000000-0000-4000-8000-000000000002"
         ]
       },
-      "tombstones": []
+      "tombstones": {}
     },
     "lists": {
       "adds": {},
-      "tombstones": []
+      "tombstones": {}
     },
     "registers": {
       "cc000000-0000-4000-8000-000000000001": {
@@ -82,7 +82,7 @@
           "0e000000-0000-4000-8000-000000000002"
         ]
       },
-      "tombstones": []
+      "tombstones": {}
     },
     "lists": {
       "adds": {
@@ -90,7 +90,7 @@
           "0e000000-0000-4000-8000-000000000001"
         ]
       },
-      "tombstones": []
+      "tombstones": {}
     },
     "registers": {
       "11000000-0000-4000-8000-000000000001": {
@@ -136,5 +136,5 @@
       }
     }
   },
-  "expected_state_sha256": "2ea791a703882ad86ff70376fb49e753964c4da592e257d0ba8d9dcc251337b0"
+  "expected_state_sha256": "d2559149c3a58a2eb7bcd37eb748ae083050e5b34dbc83421839ca83bc0a5e55"
 }

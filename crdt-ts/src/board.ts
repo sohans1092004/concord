@@ -58,10 +58,10 @@ export class Board {
       case "SET_PLACEMENT":
         return r.set(op.entity_id, "placement", op.placement, op.hlc);
       case "DELETE_LIST":
-        this.lists.remove(op.observed_tags);
+        this.lists.remove(op.list_id, op.observed_tags);
         return 0;
       case "DELETE_CARD":
-        this.cards.remove(op.observed_tags);
+        this.cards.remove(op.card_id, op.observed_tags);
         return 0;
       case "RESTORE_LIST":
         this.lists.add(op.list_id, op.op_id);

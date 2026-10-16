@@ -1,0 +1,163 @@
+{
+  "name": "054-delete-before-its-add-then-restore",
+  "rule": "§3.2",
+  "description": "The delete arrives before the add it cancels; a later RESTORE_CARD adds a fresh tag the delete never named, so the card comes back.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": {}
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "DELETE_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "observed_tags": [
+        "0e000000-0000-4000-8000-000000000002"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "Card"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000004",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000003,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "RESTORE_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001"
+    }
+  ],
+  "expected_rejected": {},
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "Card"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002",
+          "0e000000-0000-4000-8000-000000000004"
+        ]
+      },
+      "tombstones": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ]
+      }
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": {}
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Card"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "93643dd3d2ad05661862e679fc680343b666baaaf803deb6504b8fbe16e57319"
+}

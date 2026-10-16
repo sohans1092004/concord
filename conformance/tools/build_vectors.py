@@ -99,9 +99,10 @@ def creg(title, lid, key, hlc):
             "placement": reg({"list_id": lid, "position_key": key}, hlc)}
 
 
-def state(lists=None, list_tombs=(), cards=None, card_tombs=(), registers=None):
-    return {"cards": {"adds": cards or {}, "tombstones": list(card_tombs)},
-            "lists": {"adds": lists or {}, "tombstones": list(list_tombs)},
+def state(lists=None, list_tombs=None, cards=None, card_tombs=None, registers=None):
+    """Tombstones are per entity (SPEC §3.2): {entity_id: [tags]}."""
+    return {"cards": {"adds": cards or {}, "tombstones": card_tombs or {}},
+            "lists": {"adds": lists or {}, "tombstones": list_tombs or {}},
             "registers": registers or {}}
 
 
@@ -165,7 +166,7 @@ vector(
      del_card(3, H(5, 0, 2), C(1), [O(2)]),
      set_field(4, H(9, 0, 1), C(1), "title", "Draft v2")],
     view(vlist(L(1), "a0", "To Do", [])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs={C(1): [O(2)]},
           registers={L(1): lreg("To Do", "a0", H(0, 0, 1)),
                      C(1): {"title": reg("Draft v2", H(9, 0, 1)),
                             "placement": reg({"list_id": L(1), "position_key": "a0"},
@@ -183,7 +184,7 @@ vector(
      restore_card(5, H(4, 0, 1), C(1))],
     view(vlist(L(1), "a0", "To Do",
                [vcard(C(1), "a0", "Draft", description="edited after delete")])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(5)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(5)]}, card_tombs={C(1): [O(2)]},
           registers={L(1): lreg("To Do", "a0", H(0, 0, 1)),
                      C(1): {**creg("Draft", L(1), "a0", H(1, 0, 1)),
                             "description": reg("edited after delete", H(3, 0, 2))}}),
@@ -201,7 +202,7 @@ vector(
      restore_card(4, H(3, 0, 2), C(1)),
      del_card(5, H(4, 0, 3), C(1), [O(2)])],
     view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Keep me")])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs={C(1): [O(2)]},
           registers={L(1): lreg("To Do", "a0", H(0, 0, 1)),
                      C(1): creg("Keep me", L(1), "a0", H(1, 0, 1))}),
 )
@@ -273,8 +274,8 @@ vector(
 )
 
 STATE_008 = state(
-    lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs=[O(1)],
-    cards={C(1): [O(3)], C(2): [O(4)], C(3): [O(5)]}, card_tombs=[O(4)],
+    lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs={L(1): [O(1)]},
+    cards={C(1): [O(3)], C(2): [O(4)], C(3): [O(5)]}, card_tombs={C(2): [O(4)]},
     registers={L(1): lreg("To Do", "a0", H(0, 0, 1)),
                L(2): lreg("Doing", "a1", H(1, 0, 1)),
                C(1): creg("lives on", L(1), "a0", H(2, 0, 1)),
@@ -307,7 +308,7 @@ vector(
     view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "lives on")]),
          vlist(L(2), "a1", "Doing", [vcard(C(3), "a0", "unaffected")])),
     {**STATE_008, "lists": {"adds": {L(1): [O(1), O(8)], L(2): [O(2)]},
-                            "tombstones": [O(1)]}},
+                            "tombstones": {L(1): [O(1)]}}},
     initial_state=STATE_008,
 )
 
@@ -347,7 +348,7 @@ vector(
            restore_card(4, H(3, 0, 2), C(1)),
            del_card(5, H(4, 0, 3), C(1), [O(4)])],
     view(vlist(L(1), "a0", "To Do", [])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs=[O(2), O(4)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs={C(1): [O(2), O(4)]},
           registers={**lregs, C(1): c1}),
 )
 
@@ -357,7 +358,7 @@ vector(
     "known, so the add that arrives later is already cancelled.",
     [del_card(3, H(2, 0, 2), C(1), [O(2)])] + ops,
     view(vlist(L(1), "a0", "To Do", [])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs={C(1): [O(2)]},
           registers={**lregs, C(1): c1}),
 )
 
@@ -406,8 +407,8 @@ vector(
      del_list(5, H(4, 0, 1), L(1), [O(1)]),
      restore_card(6, H(5, 0, 2), C(1))],
     view(vlist(L(2), "a1", "Doing", []), orphaned([vcard(C(1), "a0", "c")])),
-    state(lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs=[O(1)],
-          cards={C(1): [O(3), O(6)]}, card_tombs=[O(3)],
+    state(lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs={L(1): [O(1)]},
+          cards={C(1): [O(3), O(6)]}, card_tombs={C(1): [O(3)]},
           registers={L(1): lreg("To Do", "a0", H(0, 0, 1)),
                      L(2): lreg("Doing", "a1", H(1, 0, 1)),
                      C(1): creg("c", L(1), "a0", H(2, 0, 1))}),
@@ -437,7 +438,7 @@ vector(
      del_list(6, H(5, 0, 1), L(1), [O(1)]),
      del_list(7, H(6, 0, 1), L(2), [O(2)])],
     view(orphaned([vcard(C(3), "Zz", "c3"), vcard(C(1), "a0", "c1"), vcard(C(2), "a0", "c2")])),
-    state(lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs=[O(1), O(2)],
+    state(lists={L(1): [O(1)], L(2): [O(2)]}, list_tombs={L(1): [O(1)], L(2): [O(2)]},
           cards={C(1): [O(4)], C(2): [O(3)], C(3): [O(5)]},
           registers={L(1): lreg("A", "a0", H(0, 0, 1)), L(2): lreg("B", "a1", H(1, 0, 1)),
                      C(1): creg("c1", L(2), "a0", H(3, 0, 1)),
@@ -451,7 +452,7 @@ vector(
     "entry, an empty view.",
     ops + [del_card(3, H(2, 0, 1), C(1), [O(2)]), del_list(4, H(3, 0, 1), L(1), [O(1)])],
     view(),
-    state(lists={L(1): [O(1)]}, list_tombs=[O(1)], cards={C(1): [O(2)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, list_tombs={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs={C(1): [O(2)]},
           registers={**lregs, C(1): c1}),
 )
 
@@ -464,7 +465,7 @@ vector(
      restore_list(3, H(2, 0, 2), L(1)),
      del_list(4, H(3, 0, 3), L(1), [O(1)])],
     view(vlist(L(1), "a0", "To Do", [])),
-    state(lists={L(1): [O(1), O(3)]}, list_tombs=[O(1)], registers=lregs),
+    state(lists={L(1): [O(1), O(3)]}, list_tombs={L(1): [O(1)]}, registers=lregs),
 )
 
 vector(
@@ -546,7 +547,7 @@ vector(
     "no-op in the algebra, so the state equals a single application.",
     ops + [ops[1], del_card(3, H(2, 0, 1), C(1), [O(2)]), del_card(3, H(2, 0, 1), C(1), [O(2)])],
     view(vlist(L(1), "a0", "To Do", [])),
-    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs=[O(2)],
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)]}, card_tombs={C(1): [O(2)]},
           registers={**lregs, C(1): c1}),
 )
 
@@ -813,7 +814,7 @@ vector(
            del_list(4, H(3, 0, 2), L(2), [O(3)]),
            move(5, H(4, 0, 1), C(1), L(2), "a0")],
     view(vlist(L(1), "a0", "To Do", []), orphaned([vcard(C(1), "a0", "Card")])),
-    state(lists={L(1): [O(1)], L(2): [O(3)]}, list_tombs=[O(3)], cards={C(1): [O(2)]},
+    state(lists={L(1): [O(1)], L(2): [O(3)]}, list_tombs={L(2): [O(3)]}, cards={C(1): [O(2)]},
           registers={**lregs, L(2): lreg("Doing", "a1", H(2, 0, 1)),
                      C(1): {**c1, "placement": reg({"list_id": L(2), "position_key": "a0"}, H(4, 0, 1))}}),
 )
@@ -827,7 +828,7 @@ vector(
            move(5, H(5, 0, 2), C(1), L(2), "a0"),
            restore_list(6, H(6, 0, 3), L(1))],
     view(vlist(L(1), "a0", "To Do", []), vlist(L(2), "a1", "Doing", [vcard(C(1), "a0", "Card")])),
-    state(lists={L(1): [O(1), O(6)], L(2): [O(3)]}, list_tombs=[O(1)], cards={C(1): [O(2)]},
+    state(lists={L(1): [O(1), O(6)], L(2): [O(3)]}, list_tombs={L(1): [O(1)]}, cards={C(1): [O(2)]},
           registers={**lregs, L(2): lreg("Doing", "a1", H(2, 0, 1)),
                      C(1): {**c1, "placement": reg({"list_id": L(2), "position_key": "a0"}, H(5, 0, 2))}}),
 )
@@ -841,7 +842,7 @@ vector(
      set_field(3, H(2, 0, 2), L(1), "title", "Renamed while deleted"),
      restore_list(4, H(3, 0, 1), L(1))],
     view(vlist(L(1), "a0", "Renamed while deleted", [])),
-    state(lists={L(1): [O(1), O(4)]}, list_tombs=[O(1)],
+    state(lists={L(1): [O(1), O(4)]}, list_tombs={L(1): [O(1)]},
           registers={L(1): {"title": reg("Renamed while deleted", H(2, 0, 2)),
                             "placement": reg({"position_key": "a0"}, H(0, 0, 1))}}),
 )
@@ -862,6 +863,49 @@ vector(
 )
 
 
+ops, lregs, c1 = base_board()
+c2 = creg("Other", L(1), "a1", H(2, 0, 1))
+vector(
+    "051-delete-naming-x-with-y-tag-leaves-y-live", "§3.2",
+    "A buggy DELETE_CARD names C1 but lists C2's tag O(3). Tombstones are per entity, so it "
+    "only tombstones the pair (C1, O(3)), which matches no add of C1: both cards stay live.",
+    ops + [add_card(3, H(2, 0, 1), C(2), L(1), "a1", "Other"),
+           del_card(4, H(3, 0, 2), C(1), [O(3)])],
+    view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card"), vcard(C(2), "a1", "Other")])),
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2)], C(2): [O(3)]}, card_tombs={C(1): [O(3)]},
+          registers={**lregs, C(1): c1, C(2): c2}),
+)
+
+vector(
+    "052-delete-list-with-a-card-tag-touches-neither", "§3.2",
+    "A DELETE_LIST for L1 lists the tag of card C1's add. Lists and cards are separate "
+    "OR-Sets and tombstones are per entity, so L1 and C1 both stay live.",
+    ops + [del_list(3, H(2, 0, 2), L(1), [O(2)])],
+    view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card")])),
+    state(lists={L(1): [O(1)]}, list_tombs={L(1): [O(2)]}, cards={C(1): [O(2)]},
+          registers={**lregs, C(1): c1}),
+)
+
+vector(
+    "053-delete-before-any-add-is-a-tombstone-without-adds", "§3.2",
+    "Only the DELETE_CARD has arrived. The state records tombstones[C1] with no adds[C1], "
+    "and nothing is shown.",
+    [ops[0], del_card(3, H(2, 0, 2), C(1), [O(2)])],
+    view(vlist(L(1), "a0", "To Do", [])),
+    state(lists={L(1): [O(1)]}, card_tombs={C(1): [O(2)]}, registers=lregs),
+)
+
+vector(
+    "054-delete-before-its-add-then-restore", "§3.2",
+    "The delete arrives before the add it cancels; a later RESTORE_CARD adds a fresh tag "
+    "the delete never named, so the card comes back.",
+    [del_card(3, H(2, 0, 2), C(1), [O(2)])] + ops + [restore_card(4, H(3, 0, 1), C(1))],
+    view(vlist(L(1), "a0", "To Do", [vcard(C(1), "a0", "Card")])),
+    state(lists={L(1): [O(1)]}, cards={C(1): [O(2), O(4)]}, card_tombs={C(1): [O(2)]},
+          registers={**lregs, C(1): c1}),
+)
+
+
 # ---- output ----------------------------------------------------------------
 
 def canonical(value):
@@ -870,7 +914,7 @@ def canonical(value):
 
 def sort_tags(s):
     for kind in ("cards", "lists"):
-        s[kind]["tombstones"] = sorted(set(s[kind]["tombstones"]))
+        s[kind]["tombstones"] = {k: sorted(set(v)) for k, v in s[kind]["tombstones"].items()}
         s[kind]["adds"] = {k: sorted(set(v)) for k, v in s[kind]["adds"].items()}
     return s
 

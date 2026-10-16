@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Random;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
+import net.jqwik.api.Assume;
 import net.jqwik.api.Combinators;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
@@ -27,7 +28,7 @@ class MergeLawsTest {
     @Provide
     Arbitrary<List<SetAction>> setActions() {
         Arbitrary<SetAction> add = Combinators.combine(Gen.cardId(), Gen.opId()).as((id, t) -> new SetAction(true, id, t, List.of()));
-        Arbitrary<SetAction> rm = Gen.opId().list().ofMaxSize(3).map(ts -> new SetAction(false, null, null, ts));
+        Arbitrary<SetAction> rm = Combinators.combine(Gen.cardId(), Gen.opId().list().ofMaxSize(3)).as((id, ts) -> new SetAction(false, id, null, ts));
         return Arbitraries.oneOf(add, rm).list().ofMaxSize(20);
     }
 
@@ -35,7 +36,7 @@ class MergeLawsTest {
         OrSet s = new OrSet();
         for (SetAction a : xs) {
             if (a.add()) s.add(a.id(), a.tag());
-            else s.remove(a.tags());
+            else s.remove(a.id(), a.tags());
         }
         return s;
     }
@@ -65,7 +66,7 @@ class MergeLawsTest {
     void orsetDeleteBeforeAddAndRestore() {
         OrSet s = new OrSet();
         String id = Gen.uuidN("cc000000", 1), t1 = Gen.uuidN("0e000000", 1), t2 = Gen.uuidN("0e000000", 2);
-        s.remove(List.of(t1));
+        s.remove(id, List.of(t1));
         s.add(id, t1);
         assertFalse(s.contains(id));
         s.add(id, t2);
@@ -74,9 +75,30 @@ class MergeLawsTest {
     }
 
     @Property
+    void orsetRemoveNamingOneIdNeverChangesAnother(
+            @ForAll("setActions") List<SetAction> xs, @ForAll("cardIds") String x, @ForAll("cardIds") String y) {
+        Assume.that(!x.equals(y));
+        OrSet s = orset(xs);
+        boolean before = s.contains(y);
+        s.remove(x, s.liveTags(y)); // even listing every live tag of y
+        assertEquals(before, s.contains(y));
+    }
+
+    @Provide
+    Arbitrary<String> cardIds() { return Gen.cardId(); }
+
+    @Property
     void orsetDecodeRoundTrips(@ForAll("setActions") List<SetAction> xs) {
         OrSet s = orset(xs);
         assertEquals(enc(s), enc(OrSet.decode(Json.parse(enc(s)))));
+    }
+
+    @Test
+    void orsetDecodeRejectsTheFlatTombstoneShape() {
+        String c1 = "\"cc000000-0000-4000-8000-000000000001\"", t1 = "\"0e000000-0000-4000-8000-000000000001\"";
+        assertThrows(IllegalArgumentException.class, () -> OrSet.decode(Json.parse("{\"adds\":{},\"tombstones\":[" + t1 + "]}")));
+        assertThrows(IllegalArgumentException.class, () -> OrSet.decode(Json.parse("{\"adds\":{},\"tombstones\":{" + c1 + ":[]}}")));
+        assertEquals(List.of(), OrSet.decode(Json.parse("{\"adds\":{},\"tombstones\":{" + c1 + ":[" + t1 + "]}}")).liveTags(c1.replace("\"", "")));
     }
 
     // ---- lww ------------------------------------------------------------------------------

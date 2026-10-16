@@ -41,11 +41,11 @@ public final class Board {
             case Op.SetField o -> r.set(o.entityId(), o.field(), o.value(), o.hlc());
             case Op.SetPlacement o -> r.set(o.entityId(), "placement", Op.placement(o.listId(), o.positionKey()), o.hlc());
             case Op.DeleteList o -> {
-                lists.remove(o.observedTags());
+                lists.remove(o.listId(), o.observedTags());
                 yield 0;
             }
             case Op.DeleteCard o -> {
-                cards.remove(o.observedTags());
+                cards.remove(o.cardId(), o.observedTags());
                 yield 0;
             }
             case Op.RestoreList o -> {

@@ -15,9 +15,12 @@ implemented. v2 left the cards of a deleted list invisible, which loses edits fr
 
 ## Decision
 
-- **Existence is an OR-Set of tags.** A tag is the `op_id` of the `ADD_*` or `RESTORE_*` that
-  made it. `DELETE_*` tombstones exactly the tags its replica observed. Tombstones are kept
-  for the life of the board, so a delete delivered before its add still wins (vector 012).
+- **Existence is an OR-Set of tags, with per-entity tombstones.** A tag is the `op_id` of the
+  `ADD_*` or `RESTORE_*` that made it. The state is `adds[id]` and `tombstones[id]`; an
+  entity is live while `adds[id]` minus `tombstones[id]` is non-empty. A `DELETE_*` naming X
+  tombstones exactly the (X, tag) pairs its replica observed, so it cannot touch any other
+  entity whatever tags it lists (vectors 051, 052). Tombstones are kept for the life of the
+  board, so a delete delivered before its add still wins (vectors 012, 053, 054).
 - **Delete wins over a concurrent edit.** An edit writes its register but adds no tag, so it
   cannot revive a deleted entity. The edit is kept and shown if the entity is restored
   (vectors 002, 003, 049).
@@ -35,6 +38,10 @@ implemented. v2 left the cards of a deleted list invisible, which loses edits fr
 - **Add wins over delete (edit revives).** Would need an edit to carry a tag, so deleting
   a card someone is typing in could never stick.
 - **Two-phase set (no restore).** Simpler, but a deleted card could never come back.
+- **One flat tombstone set of tags** (the first Phase 1 shape). Smaller, but a buggy or
+  malicious `DELETE_CARD` for card X that listed a tag of card Y deleted Y. Convergence
+  held, so no fuzz could catch it; it was found by reading the shape. Checking ownership of
+  tags on the server would have fixed only the server path, so the shape was changed.
 - **Cascade: deleting a list deletes its cards.** A write that must be merged; it races
   with concurrent moves into the list and turns an undo of the list into many undos.
 - **Hide the cards of a deleted list.** v2's choice; the cards look lost.
@@ -45,7 +52,7 @@ implemented. v2 left the cards of a deleted list invisible, which loses edits fr
 - Every replica computes the same Orphaned contents from the same state, so no op is needed.
   The fuzz generator deletes, restores and moves into deleted lists constantly; across 200
   sampled scenarios, 148 ended with a non-empty Orphaned list.
-- Tombstones grow without bound. At 2,000 cards that is IDs only (SPEC §3.2).
-- Open question for Phase 2: tombstones are a flat set, so a buggy or malicious
-  `DELETE_CARD` for card X that lists a tag belonging to card Y deletes Y. Convergence is
-  unaffected; the owner should check that `observed_tags` belong to the named entity.
+- Tombstones grow without bound. At 2,000 cards that is IDs only (SPEC §3.2). Keying them by
+  entity adds one ID per deleted entity, not per tag.
+- A bogus tag in `observed_tags` is harmless: it is stored under the named entity and
+  matches nothing there.

@@ -1,14 +1,14 @@
 // Observed-remove set of entity IDs (SPEC §3.2). Encoding: SPEC §9.2.3.
-// An ID is present while it has an add-tag that is not tombstoned. Tombstones are a
-// flat set of tags and are kept forever, so a delete that arrives before its add still
-// wins over exactly the tags it observed.
+// An ID is present while adds[id] minus tombstones[id] is non-empty. Tombstones are
+// per entity, so a delete naming X only ever tombstones (X, tag) pairs, and are kept
+// forever, so a delete that arrives before its add still wins over the tags it observed.
 
 import { compareUtf8 } from "./canonical.js";
 import { isUuid } from "./hlc.js";
 
 export type OrSetJson = {
   readonly adds: { readonly [id: string]: readonly string[] };
-  readonly tombstones: readonly string[];
+  readonly tombstones: { readonly [id: string]: readonly string[] };
 };
 
 function fail(why: string): never {
@@ -17,29 +17,25 @@ function fail(why: string): never {
 
 export class OrSet {
   private readonly addTags = new Map<string, Set<string>>();
-  private readonly tombs = new Set<string>();
+  private readonly tombs = new Map<string, Set<string>>();
 
   add(id: string, tag: string): void {
-    let tags = this.addTags.get(id);
-    if (!tags) this.addTags.set(id, (tags = new Set()));
-    tags.add(tag);
+    put(this.addTags, id, tag);
   }
 
-  /** Tombstones exactly the observed tags. */
-  remove(observed: Iterable<string>): void {
-    for (const t of observed) this.tombs.add(t);
+  /** Tombstones exactly the (id, tag) pairs observed. */
+  remove(id: string, observed: Iterable<string>): void {
+    for (const t of observed) put(this.tombs, id, t);
   }
 
   contains(id: string): boolean {
-    const tags = this.addTags.get(id);
-    if (!tags) return false;
-    for (const t of tags) if (!this.tombs.has(t)) return true;
-    return false;
+    return this.liveTags(id).length > 0;
   }
 
   /** The live (not tombstoned) tags of `id`: what a DELETE from this replica observes. */
   liveTags(id: string): string[] {
-    return [...(this.addTags.get(id) ?? [])].filter((t) => !this.tombs.has(t)).sort(compareUtf8);
+    const dead = this.tombs.get(id);
+    return [...(this.addTags.get(id) ?? [])].filter((t) => !dead?.has(t)).sort(compareUtf8);
   }
 
   /** Every ID with at least one add-tag, live or not. */
@@ -55,8 +51,8 @@ export class OrSet {
 
   /** In-place union with `other`. */
   mergeFrom(other: OrSet): void {
-    for (const [id, tags] of other.addTags) for (const t of tags) this.add(id, t);
-    for (const t of other.tombs) this.tombs.add(t);
+    for (const [id, tags] of other.addTags) for (const t of tags) put(this.addTags, id, t);
+    for (const [id, tags] of other.tombs) for (const t of tags) put(this.tombs, id, t);
   }
 
   clone(): OrSet {
@@ -66,9 +62,7 @@ export class OrSet {
   }
 
   encode(): OrSetJson {
-    const adds: Record<string, string[]> = {};
-    for (const [id, tags] of this.addTags) adds[id] = [...tags].sort(compareUtf8);
-    return { adds, tombstones: [...this.tombs].sort(compareUtf8) };
+    return { adds: encodeTags(this.addTags), tombstones: encodeTags(this.tombs) };
   }
 
   static decode(x: unknown): OrSet {
@@ -76,21 +70,33 @@ export class OrSet {
     const o = x as Record<string, unknown>;
     if (Object.keys(o).length !== 2 || !("adds" in o) || !("tombstones" in o)) fail("members must be adds, tombstones");
     const out = new OrSet();
-    const adds = o.adds;
-    if (typeof adds !== "object" || adds === null || Array.isArray(adds)) fail("adds is not an object");
-    for (const [id, tags] of Object.entries(adds as Record<string, unknown>)) {
-      if (!isUuid(id)) fail(`bad id ${id}`);
-      if (!Array.isArray(tags) || tags.length === 0) fail(`adds.${id} must be a non-empty array`);
-      for (const t of tags as unknown[]) {
-        if (!isUuid(t)) fail(`bad tag under ${id}`);
-        out.add(id, t);
-      }
-    }
-    if (!Array.isArray(o.tombstones)) fail("tombstones is not an array");
-    for (const t of o.tombstones as unknown[]) {
-      if (!isUuid(t)) fail("bad tombstone");
-      out.tombs.add(t);
-    }
+    decodeTags(o.adds, "adds", out.addTags);
+    decodeTags(o.tombstones, "tombstones", out.tombs);
     return out;
+  }
+}
+
+function put(m: Map<string, Set<string>>, id: string, tag: string): void {
+  let tags = m.get(id);
+  if (!tags) m.set(id, (tags = new Set()));
+  tags.add(tag);
+}
+
+/** {id: [tags]} with sorted tags; an entity with no tags has no entry. */
+function encodeTags(m: Map<string, Set<string>>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [id, tags] of m) out[id] = [...tags].sort(compareUtf8);
+  return out;
+}
+
+function decodeTags(x: unknown, name: string, into: Map<string, Set<string>>): void {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) fail(`${name} is not an object`);
+  for (const [id, tags] of Object.entries(x as Record<string, unknown>)) {
+    if (!isUuid(id)) fail(`bad id ${id}`);
+    if (!Array.isArray(tags) || tags.length === 0) fail(`${name}.${id} must be a non-empty array`);
+    for (const t of tags as unknown[]) {
+      if (!isUuid(t)) fail(`bad tag under ${name}.${id}`);
+      put(into, id, t);
+    }
   }
 }

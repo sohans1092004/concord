@@ -4,16 +4,16 @@ import { canonicalize } from "../src/canonical.js";
 import { OrSet } from "../src/orset.js";
 import { cardIdArb, opIdArb } from "./arb.js";
 
-type Action = { kind: "add"; id: string; tag: string } | { kind: "remove"; tags: string[] };
+type Action = { kind: "add"; id: string; tag: string } | { kind: "remove"; id: string; tags: string[] };
 
 const actionArb: fc.Arbitrary<Action> = fc.oneof(
   fc.record({ kind: fc.constant("add" as const), id: cardIdArb, tag: opIdArb }),
-  fc.record({ kind: fc.constant("remove" as const), tags: fc.array(opIdArb, { maxLength: 3 }) }),
+  fc.record({ kind: fc.constant("remove" as const), id: cardIdArb, tags: fc.array(opIdArb, { maxLength: 3 }) }),
 );
 
 const build = (actions: readonly Action[]): OrSet => {
   const s = new OrSet();
-  for (const a of actions) a.kind === "add" ? s.add(a.id, a.tag) : s.remove(a.tags);
+  for (const a of actions) a.kind === "add" ? s.add(a.id, a.tag) : s.remove(a.id, a.tags);
   return s;
 };
 
@@ -52,7 +52,7 @@ describe("orset", () => {
   it("an add is cancelled only by a remove that observed its tag", () => {
     const s = new OrSet();
     const [id, t1, t2] = ["cc000000-0000-4000-8000-000000000001", "0e000000-0000-4000-8000-000000000001", "0e000000-0000-4000-8000-000000000002"];
-    s.remove([t1]); // delete arrives before its add
+    s.remove(id, [t1]); // delete arrives before its add
     s.add(id, t1);
     expect(s.contains(id)).toBe(false);
     s.add(id, t2); // a restore's fresh tag
@@ -60,12 +60,26 @@ describe("orset", () => {
     expect(s.liveTags(id)).toEqual([t2]);
   });
 
+  it("a remove naming one ID never changes whether another ID is present", () => {
+    fc.assert(
+      fc.property(orsetArb, cardIdArb, cardIdArb, fc.array(opIdArb, { maxLength: 3 }), (s, x, y, tags) => {
+        fc.pre(x !== y);
+        const before = s.contains(y);
+        const after = s.clone();
+        after.remove(x, [...tags, ...s.liveTags(y)]); // even listing every live tag of y
+        expect(after.contains(y)).toBe(before);
+      }),
+    );
+  });
+
   it("decode(encode(s)) round-trips and decode rejects malformed input", () => {
     fc.assert(fc.property(orsetArb, (s) => {
       expect(enc(OrSet.decode(JSON.parse(enc(s))))).toBe(enc(s));
     }));
-    expect(() => OrSet.decode({ adds: {}, tombstones: [], extra: [] })).toThrow();
-    expect(() => OrSet.decode({ adds: { "cc000000-0000-4000-8000-000000000001": [] }, tombstones: [] })).toThrow();
-    expect(() => OrSet.decode({ adds: {}, tombstones: ["NOT-A-UUID"] })).toThrow();
+    expect(() => OrSet.decode({ adds: {}, tombstones: {}, extra: [] })).toThrow();
+    expect(() => OrSet.decode({ adds: { "cc000000-0000-4000-8000-000000000001": [] }, tombstones: {} })).toThrow();
+    expect(() => OrSet.decode({ adds: {}, tombstones: ["0e000000-0000-4000-8000-000000000001"] })).toThrow(); // old flat shape
+    expect(() => OrSet.decode({ adds: {}, tombstones: { "cc000000-0000-4000-8000-000000000001": [] } })).toThrow();
+    expect(() => OrSet.decode({ adds: {}, tombstones: { "cc000000-0000-4000-8000-000000000001": ["NOT-A-UUID"] } })).toThrow();
   });
 });

@@ -161,10 +161,14 @@ logical clock. Boards themselves are metadata created over REST, not CRDT state.
 
 ### 3.2 Existence: OR-Set
 
-- An entity exists while at least one add-tag is not tombstoned. A tag is the `op_id` of the
-  op that added it.
-- `DELETE_*` carries the tags the deleting replica had observed and tombstones exactly
-  those.
+- Tombstones are per entity: the set holds `adds[id]` and `tombstones[id]`, each a set of
+  tags. An entity exists while `adds[id]` minus `tombstones[id]` is non-empty. A tag is the
+  `op_id` of the op that added it.
+- `DELETE_*` naming X carries the tags the deleting replica had observed and tombstones
+  exactly the pairs (X, tag). A delete naming X never affects any other entity, even if
+  it lists another entity's tag (vectors 051, 052).
+- A delete may arrive before the add it cancels: `tombstones[X]` then exists with no
+  `adds[X]`, and the add is cancelled on arrival (vectors 012, 053, 054).
 - `RESTORE_*` adds a new tag. That is why this is an OR-Set and not a two-phase set: a
   restore concurrent with a delete survives, because the delete never observed the
   restore's tag.
@@ -268,8 +272,8 @@ Every op has `op_id` (UUID v4), `board_id`, `hlc`, `replica_id`, `type`, plus:
 | `ADD_CARD` | `card_id`, `placement`, `title` | New add-tag + initial registers |
 | `SET_FIELD` | `entity_id`, `field`, `value` | One register write. Placement is not allowed here. |
 | `SET_PLACEMENT` | `entity_id`, `placement` | Atomic placement write: move or reorder |
-| `DELETE_LIST` | `list_id`, `observed_tags` | Tombstones those tags |
-| `DELETE_CARD` | `card_id`, `observed_tags` | Tombstones those tags |
+| `DELETE_LIST` | `list_id`, `observed_tags` | Tombstones those tags of `list_id` |
+| `DELETE_CARD` | `card_id`, `observed_tags` | Tombstones those tags of `card_id` |
 | `RESTORE_LIST` | `list_id` | New add-tag |
 | `RESTORE_CARD` | `card_id` | New add-tag |
 
@@ -294,7 +298,7 @@ invalid:
 `title` a string, `description` a string, `assignee` a user ID or `null`, `labels` an
 array of strings. `ADD_*` writes the `title` and `placement` registers with the op's HLC
 and adds the tag `op_id`; `RESTORE_*` adds the tag `op_id`; `DELETE_*` tombstones
-`observed_tags`; `SET_*` writes one register.
+`observed_tags` under the entity it names; `SET_*` writes one register.
 
 ### 4.2 Validation (owner, before persisting)
 
@@ -323,9 +327,18 @@ Its exact rules, beyond step 1:
 - `labels`: at most 20; each at most 50 code points and already in Unicode NFC form;
   sorted strictly ascending by unsigned UTF-8 bytes (which also makes them unique).
   Anything else is rejected, not normalised.
+  Known limitation: the NFC check uses each runtime's Unicode tables (Java 21's
+  `java.text.Normalizer`, the browser's or Node's ICU). For characters assigned in a
+  Unicode version one side has and the other lacks, client and server can disagree on
+  whether a label is NFC. This affects validation only, never convergence: the server's
+  verdict is final, and a rejected op goes to Unsent edits (§7.4).
 - Integers are the §9.2.1 ranges; any non-integer number is rejected.
 - Step 3 is `op.checkClock(op, server_time_ms)` (§3.1). Steps 2 and 4 need server state
   and live in the Session Service.
+- The server is the only parser of client-supplied JSON, and it rejects any object with
+  a duplicate member name as `INVALID_OP`. Clients parse only server-produced JSON, which
+  never contains duplicates, so the TypeScript core may use `JSON.parse` (which keeps the
+  last duplicate) without the two sides ever reading the same text differently.
 
 A failed check returns `ERROR {code, op_id}`. Nothing is stored or broadcast. Rejected
 ops are logged with the user and reason.
@@ -545,7 +558,7 @@ committing, so a client never sees a move before the add it refers to.
 |---|---|
 | `CLOCK_SKEW` | Recompute the clock offset from the server time in the error, re-stamp the op, resend under the same `op_id` |
 | `RETRY_LATER`, `UNAVAILABLE` | Keep the op; retry with backoff |
-| `INVALID_OP` | Remove it from the queue and log it; this is a client bug |
+| `INVALID_OP` | Remove it from the send queue, log it (a client bug) and move it to the Unsent edits panel. No user edit is ever silently discarded. |
 | `UNAUTHORIZED` (access revoked while offline) | Move the op to an Unsent edits panel the user can read and export as JSON. It is never silently dropped. |
 
 ### 7.5 WebSocket protocol
@@ -649,16 +662,22 @@ The canonical encoding is RFC 8785 (JCS) restricted to integers:
 
 ```json
 {
-  "cards":     {"adds": {"<card_id>": ["<tag>", ...]}, "tombstones": ["<tag>", ...]},
-  "lists":     {"adds": {"<list_id>": ["<tag>", ...]}, "tombstones": ["<tag>", ...]},
+  "cards":     {"adds": {"<card_id>": ["<tag>", ...]}, "tombstones": {"<card_id>": ["<tag>", ...]}},
+  "lists":     {"adds": {"<list_id>": ["<tag>", ...]}, "tombstones": {"<list_id>": ["<tag>", ...]}},
   "registers": {"<entity_id>": {"<field>": {"hlc": <HLC>, "value": <value>}}}
 }
 ```
 
 - Every tag array is sorted ascending by unsigned UTF-8 bytes, with no duplicates.
-- An ID appears under `adds` only with at least one tag, and under `registers` only with
-  at least one field. The empty state is
-  `{"cards":{"adds":{},"tombstones":[]},"lists":{"adds":{},"tombstones":[]},"registers":{}}`.
+- An ID appears under `adds` or `tombstones` only with at least one tag (a delete with
+  empty `observed_tags` leaves no entry, vector 044), and under `registers` only with at
+  least one field. An ID may be under `tombstones` and not `adds` (vector 053). The empty
+  state is
+  `{"cards":{"adds":{},"tombstones":{}},"lists":{"adds":{},"tombstones":{}},"registers":{}}`.
+- Decoding a state checks its shape, not just its JSON: IDs and tags are lowercase
+  canonical UUIDs, and every `placement` register holds a §3.5 value (an object with a
+  string `position_key` and optionally a UUID `list_id`, nothing else), because the view
+  reads placements. Anything else is rejected.
 - The state holds CRDT data only: no replica clock, no board ID, no op log. Two replicas
   that have applied the same op set therefore encode to the same bytes.
 
@@ -836,3 +855,4 @@ section text itself is updated in the same commit.
 | 1 | 2026-10-16 | §9.2.1–9.2.3, §11.1 | HLC JSON is three fields; canonical encoding is integer-only RFC 8785 with fixed escapes; canonical state shape defined; ADR-000b confirmed. |
 | 2 | 2026-10-16 | §3.1, §3.4, §3.6, §3.7, §4.1, §4.2, §9.1, §9.2.4–9.2.5 | `checkClock` with a strict 60,000ms boundary; defensive LWW tie-break on unsigned canonical bytes, reported as a collision count; exact Orphaned rules with the nil-UUID reserved ID; Greenspan key format ("fractional part never ends in `0`"), `keyBetween` throws unless `a < b`, re-key rule for equal neighbours; op JSON encoding; `validateShape` rules (lowercase canonical UUIDs, no nil UUID, code-point lengths, NFC sorted labels ≤ 50 code points); view and vector formats. |
 | 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |
+| 4 | 2026-10-16 | §3.2, §4.1, §4.2, §7.4, §9.2.3 | Tombstones are per entity, `{entity_id: [tags]}`, so a delete naming X only tombstones (X, tag) pairs (closes the cross-card delete found in Phase 1; vectors 051–054). Approved: `hlc.replica_id` must equal `replica_id`; lone surrogates rejected; state decode checks placement shape. NFC table mismatch documented as a known limitation. `INVALID_OP` moves the op to Unsent edits instead of dropping it. The server is the only parser of client JSON and rejects duplicate member names. |

@@ -10,32 +10,31 @@ import java.util.Set;
 
 /**
  * Observed-remove set of entity IDs (SPEC §3.2). Encoding: SPEC §9.2.3. An ID is present while
- * it has an add-tag that is not tombstoned. Tombstones are a flat, permanent set of tags.
+ * adds[id] minus tombstones[id] is non-empty. Tombstones are per entity, so a delete naming X
+ * only ever tombstones (X, tag) pairs, and are permanent.
  */
 public final class OrSet {
     private final Map<String, Set<String>> adds = new HashMap<>();
-    private final Set<String> tombs = new HashSet<>();
+    private final Map<String, Set<String>> tombs = new HashMap<>();
 
     public void add(String id, String tag) {
-        adds.computeIfAbsent(id, k -> new HashSet<>()).add(tag);
+        put(adds, id, tag);
     }
 
-    /** Tombstones exactly the observed tags. */
-    public void remove(Iterable<String> observed) {
-        for (String t : observed) tombs.add(t);
+    /** Tombstones exactly the (id, tag) pairs observed. */
+    public void remove(String id, Iterable<String> observed) {
+        for (String t : observed) put(tombs, id, t);
     }
 
     public boolean contains(String id) {
-        Set<String> tags = adds.get(id);
-        if (tags == null) return false;
-        for (String t : tags) if (!tombs.contains(t)) return true;
-        return false;
+        return !liveTags(id).isEmpty();
     }
 
     /** The live tags of id: what a DELETE from this replica observes. */
     public List<String> liveTags(String id) {
+        Set<String> dead = tombs.getOrDefault(id, Set.of());
         List<String> out = new ArrayList<>();
-        for (String t : adds.getOrDefault(id, Set.of())) if (!tombs.contains(t)) out.add(t);
+        for (String t : adds.getOrDefault(id, Set.of())) if (!dead.contains(t)) out.add(t);
         out.sort(Canonical::compareUtf8);
         return out;
     }
@@ -53,8 +52,8 @@ public final class OrSet {
 
     /** In-place union. */
     public void mergeFrom(OrSet other) {
-        for (var e : other.adds.entrySet()) adds.computeIfAbsent(e.getKey(), k -> new HashSet<>()).addAll(e.getValue());
-        tombs.addAll(other.tombs);
+        for (var e : other.adds.entrySet()) for (String t : e.getValue()) put(adds, e.getKey(), t);
+        for (var e : other.tombs.entrySet()) for (String t : e.getValue()) put(tombs, e.getKey(), t);
     }
 
     public OrSet copy() {
@@ -64,17 +63,9 @@ public final class OrSet {
     }
 
     public Map<String, Object> encode() {
-        Map<String, Object> a = new LinkedHashMap<>();
-        for (var e : adds.entrySet()) {
-            List<String> tags = new ArrayList<>(e.getValue());
-            tags.sort(Canonical::compareUtf8);
-            a.put(e.getKey(), tags);
-        }
-        List<String> t = new ArrayList<>(tombs);
-        t.sort(Canonical::compareUtf8);
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("adds", a);
-        m.put("tombstones", t);
+        m.put("adds", encodeTags(adds));
+        m.put("tombstones", encodeTags(tombs));
         return m;
     }
 
@@ -82,21 +73,36 @@ public final class OrSet {
         if (!(x instanceof Map<?, ?> m) || m.size() != 2 || !m.containsKey("adds") || !m.containsKey("tombstones"))
             throw new IllegalArgumentException("orset: members must be adds, tombstones");
         OrSet out = new OrSet();
-        if (!(m.get("adds") instanceof Map<?, ?> adds)) throw new IllegalArgumentException("orset: adds is not an object");
-        for (var e : adds.entrySet()) {
-            if (!Hlc.isUuid(e.getKey())) throw new IllegalArgumentException("orset: bad id " + e.getKey());
-            if (!(e.getValue() instanceof List<?> tags) || tags.isEmpty())
-                throw new IllegalArgumentException("orset: adds." + e.getKey() + " must be a non-empty array");
-            for (Object t : tags) {
-                if (!Hlc.isUuid(t)) throw new IllegalArgumentException("orset: bad tag under " + e.getKey());
-                out.add((String) e.getKey(), (String) t);
-            }
-        }
-        if (!(m.get("tombstones") instanceof List<?> tombs)) throw new IllegalArgumentException("orset: tombstones is not an array");
-        for (Object t : tombs) {
-            if (!Hlc.isUuid(t)) throw new IllegalArgumentException("orset: bad tombstone");
-            out.tombs.add((String) t);
+        decodeTags(m.get("adds"), "adds", out.adds);
+        decodeTags(m.get("tombstones"), "tombstones", out.tombs);
+        return out;
+    }
+
+    private static void put(Map<String, Set<String>> m, String id, String tag) {
+        m.computeIfAbsent(id, k -> new HashSet<>()).add(tag);
+    }
+
+    /** {id: [tags]} with sorted tags; an entity with no tags has no entry. */
+    private static Map<String, Object> encodeTags(Map<String, Set<String>> m) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (var e : m.entrySet()) {
+            List<String> tags = new ArrayList<>(e.getValue());
+            tags.sort(Canonical::compareUtf8);
+            out.put(e.getKey(), tags);
         }
         return out;
+    }
+
+    private static void decodeTags(Object x, String name, Map<String, Set<String>> into) {
+        if (!(x instanceof Map<?, ?> tagMap)) throw new IllegalArgumentException("orset: " + name + " is not an object");
+        for (var e : tagMap.entrySet()) {
+            if (!Hlc.isUuid(e.getKey())) throw new IllegalArgumentException("orset: bad id " + e.getKey());
+            if (!(e.getValue() instanceof List<?> tags) || tags.isEmpty())
+                throw new IllegalArgumentException("orset: " + name + "." + e.getKey() + " must be a non-empty array");
+            for (Object t : tags) {
+                if (!Hlc.isUuid(t)) throw new IllegalArgumentException("orset: bad tag under " + name + "." + e.getKey());
+                put(into, (String) e.getKey(), (String) t);
+            }
+        }
     }
 }

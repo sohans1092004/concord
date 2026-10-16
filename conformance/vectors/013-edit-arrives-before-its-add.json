@@ -5,11 +5,11 @@
   "initial_state": {
     "cards": {
       "adds": {},
-      "tombstones": []
+      "tombstones": {}
     },
     "lists": {
       "adds": {},
-      "tombstones": []
+      "tombstones": {}
     },
     "registers": {}
   },
@@ -87,7 +87,7 @@
           "0e000000-0000-4000-8000-000000000002"
         ]
       },
-      "tombstones": []
+      "tombstones": {}
     },
     "lists": {
       "adds": {
@@ -95,7 +95,7 @@
           "0e000000-0000-4000-8000-000000000001"
         ]
       },
-      "tombstones": []
+      "tombstones": {}
     },
     "registers": {
       "11000000-0000-4000-8000-000000000001": {
@@ -141,5 +141,5 @@
       }
     }
   },
-  "expected_state_sha256": "0bb119e9c5b74a0134d05b81a3849b07316be3e369451537d780ecb12e0ca2d6"
+  "expected_state_sha256": "3f7281021e4a60fec6148882e6c00e1bc083ec29ca700225dfdd2f84c15dd109"
 }
