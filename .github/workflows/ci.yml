@@ -107,3 +107,78 @@ jobs:
         working-directory: conformance/runner
         env:
           DIFF_RUNS: "500"
+
+  # ---- Phase 2 ------------------------------------------------------------------------------
+
+  server:
+    name: server (session, gateway; Testcontainers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-reports
+          path: server/*/build/reports/tests/
+
+  client-core:
+    name: client-core (unit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  e2e:
+    name: end to end and drills (docker compose)
+    needs: [server, client-core]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: ./gradlew -q :devtools:installDist
+        working-directory: server
+      - run: npm ci
+        working-directory: client-core
+      - name: stack up
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d --build
+          for port in 7001 7002 7003 8081 8082; do
+            timeout 120 bash -c "until curl -fs localhost:$port/health >/dev/null; do sleep 1; done"
+          done
+      - name: convergence across gateways (1,000 ops) and §8 scenarios
+        run: npx vitest run test/e2e
+        working-directory: client-core
+      - name: drills
+        run: deploy/drills/run-all.sh
+      - if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color > compose.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose.log

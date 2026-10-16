@@ -1,8 +1,10 @@
-# Concord: CRDT engine (Phase 1)
+# Concord
 
-A hand-rolled CRDT engine for a collaborative kanban board, written twice, in TypeScript
-(`crdt-ts/`, the client) and Java 21 (`crdt-java/`, the server), and proven to compute
-byte-identical state. No networking, no storage: Phase 1 of [`docs/SPEC.md`](docs/SPEC.md).
+A collaborative kanban board built on a hand-rolled CRDT engine, written twice, in
+TypeScript (`crdt-ts/`, the client) and Java 21 (`crdt-java/`, the server), proven to compute
+byte-identical state (Phase 1), running inside an actor-per-board distributed system that
+never acknowledges an edit it has not durably stored (Phase 2). The spec is
+[`docs/SPEC.md`](docs/SPEC.md); Phase 2 is described [below](#phase-2-the-distributed-system).
 
 ```
 crdt-ts/              TypeScript core + property tests + permutation fuzz (vitest, fast-check)
@@ -10,7 +12,11 @@ crdt-java/            Java core + the same tests (JUnit 5, jqwik) + a line-proto
 conformance/vectors/  55 hand-written golden vectors, shared by both cores
 conformance/tools/    build_vectors.py: expands the hand-written vectors and hashes them
 conformance/runner/   differential fuzz: TypeScript generates, Java answers, any mismatch fails
-docs/adr/             ADR-000, 000b, 001, 002, 003
+server/               Phase 2, Java: common, session (board actors), gateway, devtools (dev only)
+client-core/          Phase 2, TypeScript: the headless sync client, e2e tests and drills
+deploy/               docker-compose.yml (2 gateways, 3 Session instances, Postgres, Redis), drills
+docs/adr/             ADR-000, 000b, 001–004, 006, 007
+docs/walkthrough-phase2.md   one op from a client's send to every other client's view
 ```
 
 ## What it guarantees
@@ -76,7 +82,7 @@ Fuzz runs recorded:
 | `cd crdt-ts && npm test` (500 seeds + 50 rebalance seeds) | green: `fuzz: 500 scenarios, seed 1040129639, 128801 steps, 17.8s` |
 | `cd crdt-java && ./gradlew test` (500 seeds + 50 rebalance seeds) | green: `fuzz: 500 seeds from 1, 139315 ops, 13.0s` |
 | `cd conformance/runner && npm test` (`DIFF_RUNS=500`) | green: all state/view hashes, verdicts and bytes equal |
-| `cd crdt-ts && FUZZ_RUNS=100000 npx vitest run test/fuzz.test.ts` | a local run on 2026-10-16 was stopped by the host for low system memory; the 100,000-seed runs are done by the nightly workflow instead |
+| nightly workflow (`.github/workflows/nightly.yml`), run [38936460363](https://github.com/sohans1092004/concord/actions/runs/38936460363) at `66237dd`, 2026-10-16 | green: crdt-ts 100,000 seeds (56m08s), crdt-java 100,000 seeds (38m48s), differential 5,000 scenarios (4m14s) |
 
 Branch coverage from the last local run (2026-10-16; CI prints the same tables in each
 job's summary):
@@ -138,3 +144,56 @@ Lowest per file: `Json.java` at 74.80% branches (92/123), mostly error paths of 
 The package is ready to publish but has not been. `npm pack` copies the vectors in
 (`prepack`), so the packed tarball runs its whole suite standalone; this was checked by
 packing, extracting outside the repo, `npm install` and `npx vitest run` (108 passed, 2026-10-16).
+
+## Phase 2: the distributed system
+
+One Session instance owns each board at a time and is the only place its merge runs
+(`server/session`, ADR-004); gateways are stateless and forward to it (`server/gateway`);
+Postgres is the only source of truth; Redis carries leases, owner lookup and fan-out and
+can be wiped (ADR-006, ADR-007). Start with [`docs/walkthrough-phase2.md`](docs/walkthrough-phase2.md),
+which follows one op through the code with file:line references.
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d --build   # the whole stack
+(cd server && ./gradlew test)                               # unit + integration (Testcontainers)
+(cd client-core && npm ci && npm test)                      # client unit tests
+(cd server && ./gradlew :devtools:installDist)              # then, with the stack up:
+(cd client-core && npx vitest run test/e2e)                 # convergence + §8 scenarios
+deploy/drills/run-all.sh                                    # every drill, one command
+```
+
+`devtools` (seed users, boards and members; mint JWTs) is dev-only: it refuses to run unless
+`CONCORD_ENV=dev`, and it signs only with the dev key, which every non-dev server refuses at
+startup (`common/Config.java`), so its tokens cannot validate anywhere else.
+
+### Libraries beyond those the brief named
+
+- **PostgreSQL JDBC driver** (`org.postgresql:postgresql`): plain JDBC needs a driver.
+- **Logback** (`logback-classic`): the SLF4J backend; its built-in `JsonEncoder` writes the JSON log lines, so no extra encoder library.
+- **Testcontainers modules `postgresql` and `toxiproxy`**: typed Postgres container, and Toxiproxy to cut the Postgres network after COMMIT (amendment 6 B test) and Redis for one gateway (polling test).
+- **JUnit 5**: already the Phase 1 test framework.
+- Gateway → owner links and test clients use the JDK's `java.net.http.WebSocket`; client-core uses the platform `WebSocket` (Node 22, browsers). No WebSocket library.
+
+### Exit criteria (SPEC §10, Phase 2), measured
+
+| Criterion | Command | Result |
+|---|---|---|
+| Two clients on different gateways converge over ≥ 1,000 random ops (moves, deletes, restores) | `cd client-core && npx vitest run test/e2e/convergence.test.ts` (2026-10-16T17:49:29Z, seed 972694) | 1,000 ops submitted, 1,000 ACKed, board version 1,000; both clients and a fresh third replica on state hash `2e478538…f193`; 245 SET_PLACEMENT, 112 DELETE_CARD, 108 RESTORE_CARD, 25 DELETE_LIST; 0 Unsent edits |
+| Killing an owner mid-load: new owner serving within 5s of lease expiry; every ACKed op in `board_ops` | `deploy/drills/kill-owner.sh` | serving 210, 1,474, 417, 287 and 1,221 ms after lease expiry in five runs (2026-10-16; the last from `run-all.sh`); 0 ACKed ops missing in all five. The first two runs failed the drill's no-Unsent-edits check (the client retry-order bug, fixed in `5a2a495`); the last three passed |
+| The fencing test fails when the fence check is removed | `cd server && python tools/guard_checks.py` | fails without it (`stale owner ACKed: {type=OP_ACK, … version=3}`), passes with it; output in `server/tools/guard_checks.out` |
+| `docker compose up` gives the full stack; one command runs every drill | `deploy/drills/run-all.sh` (2026-10-16T18:04:16Z–18:08:05Z, commit `21ba709`) | all five drills passed; output in `deploy/drills/results.txt` |
+
+Drills (`deploy/drills/run-all.sh`, the run above). Each asserts that every ACKed op is in
+`board_ops`, that 4 clients on both gateways and a fresh one converge to one state hash, and
+that no edit ends in Unsent edits:
+
+| Drill | Fault | Measured |
+|---|---|---|
+| kill-owner | `docker compose kill -s SIGKILL` the owner mid-load | lease had 10,587 ms left; new owner serving 1,221 ms after expiry; first ACK 11.9 s after the kill; 297 ops, 0 missing |
+| pause-owner | `docker compose pause` the owner 20.5 s, then unpause | new owner after 16.2 s; 0 commits by the stale owner after the pause (it dropped the board when its lease renewal found the new owner); 684 ops, 0 missing |
+| stop-postgres | `docker compose stop postgres` for 10.6 s | 0 ACKs while down; up to 50 pending ops per client; first ACK 8.0 s after Postgres started; 622 ops, 0 missing |
+| stop-redis | `docker compose stop redis` for 15.8 s | owners kept serving: 260 ACKs and 284 versions committed while Redis was down; clients 11–16 versions behind at the end of the outage (gateways polling owners); 569 ops, 0 missing |
+| wipe-redis | `redis-cli FLUSHALL`, then kill the owner to force a claim | owner key back after 2.6 s (lease re-taken, fence unchanged); next claim got fence 2 = `boards.fence` + 1 from the rebuilt counter; 453 ops, 0 missing |
+
+These are single runs on one laptop (Docker Desktop, 20 CPUs, 8 GB VM), not capacity
+numbers; Phase 4 measures latency and throughput properly.

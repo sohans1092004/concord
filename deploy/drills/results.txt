@@ -1,0 +1,18 @@
+command: deploy/drills/run-all.sh   started 2026-10-16T18:04:16Z at commit 21ba709
+== kill-owner
+DRILL {"drill":"kill-owner","board":"b7f9627b-3778-4193-9429-645fc877c698","clients":4,"killed":"session3","new_owner":"session1","fence":"1 -> 2","lease_remaining_at_kill_ms":10587,"new_owner_serving_after_lease_expiry_ms":1221,"first_ack_after_kill_ms":11910,"duration_s":25.8,"ops_submitted":296,"acks":297,"board_version":297,"rows_in_board_ops":297,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"0bde5a861c2db3683dc72397aa91688ed8879381d3f8794982a2d83d444f87d5"}
+      Tests  1 passed | 4 skipped (5)
+== pause-owner
+DRILL {"drill":"pause-owner","board":"371b1342-dcdf-4675-898e-718d3f7af5fe","clients":4,"paused":"session1","paused_for_ms":20527,"new_owner":"session2","fence":"1 -> 2","new_owner_after_pause_ms":16174,"commits_by_stale_owner_after_pause":0,"stale_owner_fence_rejections":0,"duration_s":45,"ops_submitted":683,"acks":684,"board_version":684,"rows_in_board_ops":684,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"6f7e0c696864d4962de3418542b15f18a7aac3a448715fb61dfef4f93ceb6452"}
+      Tests  1 passed | 4 skipped (5)
+== stop-postgres
+DRILL {"drill":"stop-postgres","board":"df4a473f-27c1-4797-b3a4-421e4c3bc762","clients":4,"postgres_down_ms":10605,"acks_while_down":0,"pending_peak_per_client":50,"first_ack_after_postgres_start_ms":7961,"duration_s":42.4,"ops_submitted":621,"acks":622,"board_version":622,"rows_in_board_ops":622,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"93cf2b38dfeff745a584254e60967f0e3be92156cc5a76c8df50a354b68d0630"}
+      Tests  1 passed | 4 skipped (5)
+== stop-redis
+DRILL {"drill":"stop-redis","board":"49e28ca1-593b-4ebd-90b4-c52ee14a7a66","clients":4,"redis_down_ms":15849,"acks_while_down":260,"versions_committed_while_down":284,"client_lag_in_versions_at_end_of_outage":[12,16,11,15],"duration_s":32.6,"ops_submitted":568,"acks":569,"board_version":569,"rows_in_board_ops":569,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"05125d35409a3a38b83eb40af206b437c3bef7f0ded9cc1094c6bfe1bdeb075d"}
+      Tests  1 passed | 4 skipped (5)
+== wipe-redis
+DRILL {"drill":"wipe-redis","board":"aa78def1-589d-491e-98c4-9f37295ecdc1","clients":4,"owner_before":"session3 fence 1","owner_after":"session3 fence 1","owner_key_back_after_ms":2582,"boards_fence":"1 -> 1","claimed_after_wipe":"session2 fence 2","fence_counter_after_claim":"2","duration_s":36.8,"ops_submitted":452,"acks":453,"board_version":453,"rows_in_board_ops":453,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"75b8860b2d3a3e3a8e9fc5ddcd6a417a3fb2cbb1bfcb86cc755917750109b5ef"}
+      Tests  1 passed | 4 skipped (5)
+all drills passed
+exit 0 at 2026-10-16T18:08:05Z
