@@ -38,6 +38,11 @@ export class OrSet {
     return [...(this.addTags.get(id) ?? [])].filter((t) => !dead?.has(t)).sort(compareUtf8);
   }
 
+  /** Has `id` at least one add-tag, live or not? */
+  everAdded(id: string): boolean {
+    return this.addTags.has(id);
+  }
+
   /** Every ID with at least one add-tag, live or not. */
   ids(): IterableIterator<string> {
     return this.addTags.keys();

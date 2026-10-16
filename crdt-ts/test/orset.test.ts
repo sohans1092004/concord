@@ -53,8 +53,10 @@ describe("orset", () => {
     const s = new OrSet();
     const [id, t1, t2] = ["cc000000-0000-4000-8000-000000000001", "0e000000-0000-4000-8000-000000000001", "0e000000-0000-4000-8000-000000000002"];
     s.remove(id, [t1]); // delete arrives before its add
+    expect(s.everAdded(id)).toBe(false); // a tombstone alone is not an add
     s.add(id, t1);
     expect(s.contains(id)).toBe(false);
+    expect(s.everAdded(id)).toBe(true); // added, even though deleted
     s.add(id, t2); // a restore's fresh tag
     expect(s.contains(id)).toBe(true);
     expect(s.liveTags(id)).toEqual([t2]);

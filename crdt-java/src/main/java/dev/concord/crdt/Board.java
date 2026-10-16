@@ -82,6 +82,11 @@ public final class Board {
         return (list ? lists : cards).liveTags(id);
     }
 
+    /** Has id ever been added as a list (or card), live or deleted? */
+    public boolean everAdded(boolean list, String id) {
+        return (list ? lists : cards).everAdded(id);
+    }
+
     private String positionKey(String id) {
         Lww.Register p = registers.get(id, "placement");
         return p == null ? null : (String) ((Map<?, ?>) p.value()).get("position_key");

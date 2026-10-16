@@ -93,6 +93,11 @@ export class Board {
     return (kind === "list" ? this.lists : this.cards).liveTags(id);
   }
 
+  /** Has `id` ever been added as a list (or card), live or deleted? */
+  everAdded(kind: "list" | "card", id: string): boolean {
+    return (kind === "list" ? this.lists : this.cards).everAdded(id);
+  }
+
   view(): View {
     const placementKey = (id: string): string | undefined => {
       const p = this.registers.get(id, "placement")?.value as { position_key: string } | undefined;

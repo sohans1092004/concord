@@ -67,8 +67,10 @@ class MergeLawsTest {
         OrSet s = new OrSet();
         String id = Gen.uuidN("cc000000", 1), t1 = Gen.uuidN("0e000000", 1), t2 = Gen.uuidN("0e000000", 2);
         s.remove(id, List.of(t1));
+        assertFalse(s.everAdded(id)); // a tombstone alone is not an add
         s.add(id, t1);
         assertFalse(s.contains(id));
+        assertTrue(s.everAdded(id)); // added, even though deleted
         s.add(id, t2);
         assertTrue(s.contains(id));
         assertEquals(List.of(t2), s.liveTags(id));

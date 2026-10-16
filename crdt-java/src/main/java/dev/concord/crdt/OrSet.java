@@ -39,6 +39,11 @@ public final class OrSet {
         return out;
     }
 
+    /** Has id at least one add-tag, live or not? */
+    public boolean everAdded(String id) {
+        return adds.containsKey(id);
+    }
+
     /** Every ID with at least one add-tag, live or not. */
     public Set<String> ids() {
         return adds.keySet();
