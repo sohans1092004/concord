@@ -106,7 +106,10 @@ export interface Generated {
   readonly collisions: number;
 }
 
-export function generate(s: Scenario): Generated {
+/** Called as each op is made, with the indices its replica had seen: anything else is concurrent. */
+export type OnEmit = (op: Op, index: number, known: ReadonlySet<number>) => void;
+
+export function generate(s: Scenario, onEmit?: OnEmit): Generated {
   const reps = s.skews.map((_, i) => new Replica(idFor("a0000000", i, s.seed)));
   const ops: Op[] = [];
   const opIndex = new Map<string, number>();
@@ -156,6 +159,7 @@ export function generate(s: Scenario): Generated {
       if (!check.ok) throw new Error(`generator bug at step ${stepNo}: ${check.reason}: ${JSON.stringify(op)}`);
       opIndex.set(op.op_id, ops.length);
       ops.push(op);
+      onEmit?.(op, ops.length - 1, rep.known);
       deliver(rep, ops.length - 1, now);
     };
 

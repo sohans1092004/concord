@@ -50,8 +50,18 @@ class FuzzTest {
 
     record Generated(List<Op> ops, List<Board> partial, List<List<Integer>> unseen, int collisions) {}
 
-    @SuppressWarnings("unchecked")
     static Generated generate(long seed, int nReplicas, int nSteps, boolean sameGap, boolean dominant) {
+        return generate(seed, nReplicas, nSteps, sameGap, dominant, null);
+    }
+
+    /** Called as each op is made, with the indices its replica had seen: anything else is concurrent. */
+    interface OnEmit {
+        void accept(Op op, int index, Set<Integer> known);
+    }
+
+    @SuppressWarnings("unchecked")
+    static Generated generate(long seed, int nReplicas, int nSteps, boolean sameGap, boolean dominant,
+                              OnEmit onEmit) {
         Random rnd = new Random(seed);
         List<Replica> reps = new ArrayList<>();
         long[] skews = new long[nReplicas];
@@ -96,6 +106,7 @@ class FuzzTest {
                 Op.Check c = Op.checkShape(m);
                 if (!c.ok()) throw new IllegalStateException("generator bug: " + c.reason() + ": " + Canonical.encode(m));
                 ops.add(Op.parse(m));
+                if (onEmit != null) onEmit.accept(ops.get(ops.size() - 1), ops.size() - 1, rep.known);
                 deliver(rep, ops, ops.size() - 1, nowF, collisions);
             };
             Map<String, Object> view = rep.board.view();
@@ -288,14 +299,10 @@ class FuzzTest {
     static void fuzz(String name, int runs, boolean forceSameGap) {
         long first = Long.parseLong(System.getenv().getOrDefault("FUZZ_SEED", "1"));
         long started = System.nanoTime();
-        long steps = 0;
+        long nOps = 0;
         for (long seed = first; seed < first + runs; seed++) {
-            Random p = new Random(seed * 0x9E3779B97F4A7C15L);
-            int replicas = 3 + p.nextInt(3);
-            int n = forceSameGap ? 450 + p.nextInt(51) : 50 + p.nextInt(451);
-            boolean sameGap = forceSameGap || p.nextInt(4) == 0;
-            steps += n;
-            Generated g = generate(seed, replicas, n, sameGap, forceSameGap);
+            Generated g = scenario(seed, forceSameGap, null);
+            nOps += g.ops().size();
             String why = problem(g, seed);
             if (why != null) {
                 List<Op> minimal = minimize(g.ops());
@@ -304,7 +311,16 @@ class FuzzTest {
                 fail(name + " failure at seed " + seed + ": " + why + "; minimal failing op set (" + minimal.size() + " of " + g.ops().size() + " ops):\n" + ops);
             }
         }
-        System.out.printf("%s: %d seeds from %d, %d steps, %.1fs%n", name, runs, first, steps, (System.nanoTime() - started) / 1e9);
+        System.out.printf("%s: %d seeds from %d, %d ops, %.1fs%n", name, runs, first, nOps, (System.nanoTime() - started) / 1e9);
+    }
+
+    /** The scenario a seed stands for (replica count, length, same-gap) and its generated ops. */
+    static Generated scenario(long seed, boolean forceSameGap, OnEmit onEmit) {
+        Random p = new Random(seed * 0x9E3779B97F4A7C15L);
+        int replicas = 3 + p.nextInt(3);
+        int n = forceSameGap ? 450 + p.nextInt(51) : 50 + p.nextInt(451);
+        boolean sameGap = forceSameGap || p.nextInt(4) == 0;
+        return generate(seed, replicas, n, sameGap, forceSameGap, onEmit);
     }
 
     static int runs() {
