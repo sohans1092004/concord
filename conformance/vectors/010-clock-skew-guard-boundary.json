@@ -1,0 +1,151 @@
+{
+  "name": "010-clock-skew-guard-boundary",
+  "rule": "§3.1",
+  "description": "Server time is T0+100000. An op exactly 60,000ms ahead is accepted; one 60,001ms ahead is rejected with CLOCK_SKEW; an op 100s in the past is accepted, because age is never a reason to reject.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {}
+  },
+  "server_time_ms": 1760000100000,
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000160000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000160001,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "too far ahead"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000003"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000003",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000002",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "old op"
+    }
+  ],
+  "expected_rejected": {
+    "0e000000-0000-4000-8000-000000000002": "CLOCK_SKEW"
+  },
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000002",
+            "position_key": "a0",
+            "title": "old op"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000002": [
+          "0e000000-0000-4000-8000-000000000003"
+        ]
+      },
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": []
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000160000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000160000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000002": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000003"
+          },
+          "value": "old op"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000003"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "cac53db2dba8d2c55adca8bdaba28ff5478e72bf62873cf5144dec8239b6767f"
+}

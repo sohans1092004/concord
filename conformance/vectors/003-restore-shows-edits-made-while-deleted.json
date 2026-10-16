@@ -1,0 +1,184 @@
+{
+  "name": "003-restore-shows-edits-made-while-deleted",
+  "rule": "§3.3",
+  "description": "A card is deleted, edited while deleted, then restored. The restored card shows the edit made after the delete.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "Draft"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "DELETE_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "observed_tags": [
+        "0e000000-0000-4000-8000-000000000002"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000004",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000003,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "description",
+      "value": "edited after delete"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000005",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000004,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "RESTORE_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001"
+    }
+  ],
+  "expected_rejected": {},
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "Draft",
+            "description": "edited after delete"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002",
+          "0e000000-0000-4000-8000-000000000005"
+        ]
+      },
+      "tombstones": [
+        "0e000000-0000-4000-8000-000000000002"
+      ]
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": []
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Draft"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        },
+        "description": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000003,
+            "replica_id": "a0000000-0000-4000-8000-000000000002"
+          },
+          "value": "edited after delete"
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "cfa6f33e5812397b279ce859ce1cc2c9395e401a41efaa9a917d53571085a162"
+}

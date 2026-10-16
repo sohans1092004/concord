@@ -154,6 +154,9 @@ logical clock. Boards themselves are metadata created over REST, not CRDT state.
   server time, with `ERROR CLOCK_SKEW` and the server time. The client recomputes its
   offset, re-stamps the op with a new HLC and resends it under the same `op_id`.
   Without this guard, one fast clock wins every contest it joins.
+- The guard is the pure function `op.checkClock(op, server_time_ms)`. It rejects if and
+  only if `op.hlc.physical_ms > server_time_ms + 60000` (strict): an op exactly 60,000ms
+  ahead is accepted, 60,001ms is rejected.
 - Ops older than the clock are always accepted; age is never a reason to reject.
 
 ### 3.2 Existence: OR-Set
@@ -180,6 +183,15 @@ while the entity is deleted.
 - Per entity, each key is a register `{value, hlc}`. Merge keeps the higher HLC. Two
   different values with the same HLC cannot exist: the HLC includes the replica, and a
   replica never reuses a tick.
+- Defensive tie-break, for when that invariant is broken anyway (a buggy client, a
+  corrupt snapshot): if two registers have equal HLCs and different values, keep the
+  value whose canonical encoding (§9.2.2) is greater, comparing UTF-8 bytes as
+  **unsigned** bytes (`Arrays.compareUnsigned` in Java, a byte loop over `Uint8Array`
+  in TypeScript; never Java `String.compareTo`, whose UTF-16 order differs outside the
+  BMP). This keeps merge a true join on every state, valid or not.
+- When the tie-break fires, `lww.set`, `lww.merge`, `board.apply` and `board.merge`
+  report it as a collision count in their result, so the server can export it as a
+  metric. The modules stay pure: they never log.
 - Card keys: `title`, `description`, `assignee`, `labels` (the whole set as one value),
   `placement`.
 - List keys: `title`, `placement`.
@@ -200,15 +212,39 @@ Orphaned list. This is a derived view, not a write, so every replica computes th
 result. Restoring the list returns its cards. Moving a card out of Orphaned is an ordinary
 placement write.
 
+Exact rules (the view is a pure function of the state):
+
+- An entity is *rendered* when it is live (§3.2) and has a `placement` register. An
+  entity with no placement register can only exist before its `ADD_*` has arrived; it is
+  not shown.
+- A rendered card is shown in the list its `placement.list_id` names if that list is
+  rendered. Otherwise — the list is deleted, *or has never been seen by this replica*
+  (ops delivered out of order), or the placement has no `list_id` — it is shown in
+  Orphaned.
+- When a never-seen list's `ADD_LIST` arrives, its cards return to it with no write.
+- A deleted card in a deleted list is not shown anywhere.
+- Orphaned has the reserved ID `00000000-0000-0000-0000-000000000000` (the nil UUID).
+  It is shown after every other list, and only when it has at least one card. Its cards
+  are sorted by `(position_key, entity_id)` like any list.
+- No op may target the nil UUID (§4.2), so Orphaned can never be created, deleted or
+  moved into; moving a card out of it is an ordinary `SET_PLACEMENT`.
+
 ### 3.7 Ordering keys
 
 - Keys use base62 in ASCII order: `0–9`, `A–Z`, `a–z`. Plain byte comparison sorts them in
   Java and TypeScript alike.
-- `keyBetween(a, b)` follows the rules of Greenspan's fractional-indexing algorithm.
-  `null` means the open start or end. A key never ends in `0`, so there is always room
-  before it.
+- `keyBetween(a, b)` is a credited port of Greenspan's fractional-indexing algorithm
+  (MIT; see ADR-001). `null` means the open start or end. A key is an *integer part*
+  whose length is fixed by its head character (`a`–`z`: 2–27 characters; `A`–`Z`: 27–2)
+  followed by a *fractional part*. **The fractional part never ends in `0`**, so there is
+  always room before a key. The first key is `a0` (integer part only).
+- `keyBetween(a, b)` throws unless `a < b`. It is deterministic: no randomness.
 - Render order is `(position_key, entity_id)`. Equal keys from concurrent inserts sort
-  by ID, deterministically, with no suffix.
+  by ID, deterministically, with no suffix. Equal keys are common, not rare: the midpoint
+  is deterministic, so two replicas appending to the same list at once pick the same key.
+- Inserting between two neighbours with equal keys: first re-key the upper neighbour
+  with an ordinary `SET_PLACEMENT`, repeating for each further neighbour that shares the
+  key, then insert between the now-distinct keys. `keys.planInsert` computes these writes.
 - Known anomaly: two users inserting several cards into the same gap at once can see
   them interleave. Acceptable for a board; documented in ADR-001.
 - Rebalance: when a key passes 40 characters, the owner issues ordinary
@@ -239,16 +275,56 @@ Every op has `op_id` (UUID v4), `board_id`, `hlc`, `replica_id`, `type`, plus:
 An `ADD_*` for an ID that already exists is invalid. Entity IDs are UUIDs made once by the
 creating client.
 
+JSON encoding. Every op is one object with exactly these members; any other member is
+invalid:
+
+| Type | Members besides `op_id`, `board_id`, `hlc`, `replica_id`, `type` |
+|---|---|
+| `ADD_LIST` | `list_id`, `placement: {position_key}`, `title` |
+| `ADD_CARD` | `card_id`, `placement: {list_id, position_key}`, `title` |
+| `SET_FIELD` | `entity_id`, `field` (`title`, `description`, `assignee` or `labels`), `value` |
+| `SET_PLACEMENT` | `entity_id`, `placement` (card form `{list_id, position_key}` or list form `{position_key}`) |
+| `DELETE_LIST` | `list_id`, `observed_tags: [op_id, ...]` |
+| `DELETE_CARD` | `card_id`, `observed_tags: [op_id, ...]` |
+| `RESTORE_LIST` | `list_id` |
+| `RESTORE_CARD` | `card_id` |
+
+`hlc` is the §9.2.1 object and `hlc.replica_id` must equal `replica_id`. Field values:
+`title` a string, `description` a string, `assignee` a user ID or `null`, `labels` an
+array of strings. `ADD_*` writes the `title` and `placement` registers with the op's HLC
+and adds the tag `op_id`; `RESTORE_*` adds the tag `op_id`; `DELETE_*` tombstones
+`observed_tags`; `SET_*` writes one register.
+
 ### 4.2 Validation (owner, before persisting)
 
-1. Schema: known type, required fields, types, title ≤ 200 chars, description ≤ 10,000,
-   ≤ 20 labels.
+1. Schema: known type, required fields, types, title ≤ 200 code points, description
+   ≤ 10,000 code points, ≤ 20 labels.
 2. Authorization: the sender's role on this board, re-read per op from a 30s membership
    cache that is cleared when membership changes. Viewers can submit no ops.
 3. Clock: §3.1 skew guard.
 4. References: `SET_PLACEMENT` and `ADD_CARD` must name a list that has existed on this
    board (live or deleted, per §3.6).
-5. Key sanity: a `position_key` is 1–64 base62 characters and does not end in `0`.
+5. Key sanity: a `position_key` is 1–64 base62 characters and passes Greenspan's full
+   key check: the head character is `a`–`z` or `A`–`Z`, the integer part has the length
+   that head requires, the fractional part does not end in `0`, and the key is not the
+   reserved minimum `A` followed by 26 `0`s.
+
+Steps 1 and 5 are `op.validateShape(op)`, a pure function shared by client and server.
+Its exact rules, beyond step 1:
+
+- Every ID (`op_id`, `board_id`, `replica_id`, entity IDs, `list_id`, `assignee`,
+  `observed_tags` entries) is a lowercase canonical UUID: `8-4-4-4-12` lowercase hex
+  digits. Uppercase, braces or missing hyphens are rejected.
+- No ID may be the nil UUID `00000000-0000-0000-0000-000000000000`, which is reserved for
+  Orphaned (§3.6). In particular `ADD_CARD` and `SET_PLACEMENT` cannot target it.
+- Lengths are counted in Unicode code points, so Java and TypeScript agree. Strings must
+  be well-formed Unicode (no lone surrogates).
+- `labels`: at most 20; each at most 50 code points and already in Unicode NFC form;
+  sorted strictly ascending by unsigned UTF-8 bytes (which also makes them unique).
+  Anything else is rejected, not normalised.
+- Integers are the §9.2.1 ranges; any non-integer number is rejected.
+- Step 3 is `op.checkClock(op, server_time_ms)` (§3.1). Steps 2 and 4 need server state
+  and live in the Session Service.
 
 A failed check returns `ERROR {code, op_id}`. Nothing is stored or broadcast. Rejected
 ops are logged with the user and reason.
@@ -523,8 +599,8 @@ main correctness claim, and both gate every merge in CI.
 
 - `orset`, `lww`, `board`: `merge(A, B) = merge(B, A)`, `merge(merge(A, B), C) = merge(A, merge(B, C))`,
   `merge(A, A) = A`, over random states.
-- `keys`: for random `a < b`, `a < keyBetween(a, b) < b`; no key ends in `0`; `null`
-  bounds work.
+- `keys`: for random `a < b`, `a < keyBetween(a, b) < b`; no generated key's fractional
+  part ends in `0` (every generated key passes the §4.2 step 5 check); `null` bounds work.
 - `hlc`: tick is strictly increasing; receive exceeds both inputs.
 - Permutation fuzz: generate 50–500 random ops across 3–5 simulated replicas,
   deliberately heavy on concurrent moves of the same card, delete versus edit, delete
@@ -584,6 +660,57 @@ The canonical encoding is RFC 8785 (JCS) restricted to integers:
   `{"cards":{"adds":{},"tombstones":[]},"lists":{"adds":{},"tombstones":[]},"registers":{}}`.
 - The state holds CRDT data only: no replica clock, no board ID, no op log. Two replicas
   that have applied the same op set therefore encode to the same bytes.
+
+#### 9.2.4 View
+
+`board.view()` returns, in canonical JSON:
+
+```json
+{"lists": [
+  {"id": "<list_id>", "position_key": "a0", "title": "To Do", "cards": [
+    {"id": "<card_id>", "position_key": "a0", "title": "...", "description": "...",
+     "assignee": "<user_id>" | null, "labels": ["..."]}
+  ]},
+  {"id": "00000000-0000-0000-0000-000000000000", "cards": [ ... ]}
+]}
+```
+
+Lists and cards appear per §3.6, each sorted by `(position_key, id)` as unsigned bytes.
+An entity's `title`, `description`, `assignee` and `labels` members are present exactly
+when that register exists. Orphaned, when present, is last and has only `id` and `cards`.
+
+#### 9.2.5 Vector format
+
+```json
+{
+  "name": "002-delete-wins-over-concurrent-edit",
+  "rule": "§3.3",
+  "description": "...",
+  "initial_state": <canonical state>,
+  "server_time_ms": 1760000000000,
+  "ops": [<op>, ...],
+  "expected_rejected": {"<op_id>": "INVALID_OP" | "CLOCK_SKEW"},
+  "expected_collisions": 0,
+  "expected_view": <view>,
+  "expected_state": <canonical state>,
+  "expected_state_sha256": "<64 hex>"
+}
+```
+
+A runner decodes `initial_state`, then takes `ops` in order: an op failing
+`validateShape` is `INVALID_OP`; if `server_time_ms` is present, an op failing
+`checkClock` is `CLOCK_SKEW`. The rejected set must equal `expected_rejected` exactly
+(`server_time_ms` and `expected_rejected` are optional). Accepted ops are applied in
+order; their summed collision counts must equal `expected_collisions`. Then the view must
+encode to the same bytes as `expected_view`, the state to the same bytes as
+`expected_state`, and the state's SHA-256 must equal `expected_state_sha256`. Finally the
+accepted ops are applied again, in reverse order, to a fresh decode of `initial_state`,
+and must give the same state bytes.
+
+Expected values are written by hand. `conformance/tools/build_vectors.py` only expands
+readable aliases into UUIDs, sorts tag arrays and computes each hash from the
+hand-written `expected_state` with Python's JSON encoder, a third implementation
+independent of both cores.
 - `conformance/vectors/*.json`: an initial state, an op list and the expected view and
   state hash. At least 50 hand-written vectors, one per rule in §3, plus every shrunk fuzz
   failure.
@@ -706,3 +833,4 @@ section text itself is updated in the same commit.
 | # | Date | Sections | Change |
 |---|---|---|---|
 | 1 | 2026-10-16 | §9.2.1–9.2.3, §11.1 | HLC JSON is three fields; canonical encoding is integer-only RFC 8785 with fixed escapes; canonical state shape defined; ADR-000b confirmed. |
+| 2 | 2026-10-16 | §3.1, §3.4, §3.6, §3.7, §4.1, §4.2, §9.1, §9.2.4–9.2.5 | `checkClock` with a strict 60,000ms boundary; defensive LWW tie-break on unsigned canonical bytes, reported as a collision count; exact Orphaned rules with the nil-UUID reserved ID; Greenspan key format ("fractional part never ends in `0`"), `keyBetween` throws unless `a < b`, re-key rule for equal neighbours; op JSON encoding; `validateShape` rules (lowercase canonical UUIDs, no nil UUID, code-point lengths, NFC sorted labels ≤ 50 code points); view and vector formats. |
