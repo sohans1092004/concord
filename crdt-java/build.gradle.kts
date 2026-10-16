@@ -1,6 +1,7 @@
 plugins {
     java
     application
+    jacoco
 }
 
 group = "dev.concord"
@@ -31,5 +32,13 @@ tasks.test {
         events("failed")
         showStandardStreams = true
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        html.required = true
     }
 }

@@ -38,9 +38,12 @@ jobs:
           cache-dependency-path: crdt-ts/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: tests with branch coverage (500 fuzz seeds)
+        run: npm run coverage
         env:
           FUZZ_RUNS: "500"
+      - name: coverage summary
+        run: python ../.github/scripts/coverage_summary.py ts coverage/coverage-summary.json >> "$GITHUB_STEP_SUMMARY"
       - run: npm run build
       - name: publishable as a standalone package
         run: npm pack --dry-run
@@ -64,9 +67,16 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew test jar
+      - name: tests with branch coverage (500 fuzz seeds), and the CLI jar
+        run: ./gradlew test jacocoTestReport jar
         env:
           FUZZ_RUNS: "500"
+      - name: coverage summary
+        run: python ../.github/scripts/coverage_summary.py java build/reports/jacoco/test/jacocoTestReport.xml >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: crdt-java/build/reports/jacoco/test/
       - uses: actions/upload-artifact@v4
         with:
           name: crdt-java-jar

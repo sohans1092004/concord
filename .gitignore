@@ -4,3 +4,4 @@ build/
 .gradle/
 *.log
 .fuzz-failures/
+coverage/

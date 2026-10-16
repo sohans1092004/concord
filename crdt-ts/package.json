@@ -29,11 +29,13 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "prepack": "node -e \"require('fs').cpSync('../conformance/vectors','vectors',{recursive:true})\"",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
+    "@vitest/coverage-v8": "3.2.7",
     "fast-check": "4.10.2",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
