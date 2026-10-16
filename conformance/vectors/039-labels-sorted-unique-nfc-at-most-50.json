@@ -1,0 +1,234 @@
+{
+  "name": "039-labels-sorted-unique-nfc-at-most-50",
+  "rule": "§4.2",
+  "description": "Unsorted, NFD, 51-code-point and duplicate labels are INVALID_OP. U+FF61 then U+1F600 is accepted: that is ascending UTF-8 byte order (EF... < F0...), though UTF-16 order says the opposite.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "Card"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "labels",
+      "value": [
+        "b",
+        "a"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000004",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000003,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "labels",
+      "value": [
+        "é"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000005",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000004,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "labels",
+      "value": [
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000006",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000005,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "labels",
+      "value": [
+        "a",
+        "a"
+      ]
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000007",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000006,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "SET_FIELD",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "field": "labels",
+      "value": [
+        "｡",
+        "😀"
+      ]
+    }
+  ],
+  "expected_rejected": {
+    "0e000000-0000-4000-8000-000000000003": "INVALID_OP",
+    "0e000000-0000-4000-8000-000000000004": "INVALID_OP",
+    "0e000000-0000-4000-8000-000000000005": "INVALID_OP",
+    "0e000000-0000-4000-8000-000000000006": "INVALID_OP"
+  },
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "Card",
+            "labels": [
+              "｡",
+              "😀"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ]
+      },
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": []
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "Card"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        },
+        "labels": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000006,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": [
+            "｡",
+            "😀"
+          ]
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "66e89b997d7d624f50cc330d135187087048c32e19e31a108d2d56681b8b61ab"
+}

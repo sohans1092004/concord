@@ -1,0 +1,255 @@
+{
+  "name": "046-insert-concurrent-with-rebalance-moves-the-insert",
+  "rule": "§3.7",
+  "description": "Known anomaly: replica 3 rebalances Zz, ZzV to a0, a1 while replica 2 concurrently inserts ZzG between the old keys. The insert now sorts above both: deterministic on every replica, but not where its author put it.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {}
+  },
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000000,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "Zz"
+      },
+      "title": "first"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000003",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000002,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000002",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "ZzV"
+      },
+      "title": "second"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000004",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000010,
+        "replica_id": "a0000000-0000-4000-8000-000000000003"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000003",
+      "type": "SET_PLACEMENT",
+      "entity_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      }
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000005",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 1,
+        "physical_ms": 1760000000010,
+        "replica_id": "a0000000-0000-4000-8000-000000000003"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000003",
+      "type": "SET_PLACEMENT",
+      "entity_id": "cc000000-0000-4000-8000-000000000002",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a1"
+      }
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000006",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000000010,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000003",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "ZzG"
+      },
+      "title": "between"
+    }
+  ],
+  "expected_rejected": {},
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0",
+        "title": "To Do",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000003",
+            "position_key": "ZzG",
+            "title": "between"
+          },
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "first"
+          },
+          {
+            "id": "cc000000-0000-4000-8000-000000000002",
+            "position_key": "a1",
+            "title": "second"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ],
+        "cc000000-0000-4000-8000-000000000002": [
+          "0e000000-0000-4000-8000-000000000003"
+        ],
+        "cc000000-0000-4000-8000-000000000003": [
+          "0e000000-0000-4000-8000-000000000006"
+        ]
+      },
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {
+        "11000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "tombstones": []
+    },
+    "registers": {
+      "11000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "To Do"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000000,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": {
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000001,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "first"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000010,
+            "replica_id": "a0000000-0000-4000-8000-000000000003"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000002": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000002,
+            "replica_id": "a0000000-0000-4000-8000-000000000001"
+          },
+          "value": "second"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 1,
+            "physical_ms": 1760000000010,
+            "replica_id": "a0000000-0000-4000-8000-000000000003"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a1"
+          }
+        }
+      },
+      "cc000000-0000-4000-8000-000000000003": {
+        "title": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000010,
+            "replica_id": "a0000000-0000-4000-8000-000000000002"
+          },
+          "value": "between"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 0,
+            "physical_ms": 1760000000010,
+            "replica_id": "a0000000-0000-4000-8000-000000000002"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "ZzG"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "27de3d5429d924f56f7408df0e80711dc3bbb945c58e8ef8a564fde1044a723c"
+}

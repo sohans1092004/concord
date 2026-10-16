@@ -1,0 +1,108 @@
+{
+  "name": "043-clock-skew-rejected-list-leaves-its-card-orphaned",
+  "rule": "§3.1 §3.6",
+  "description": "Server time T0. The ADD_LIST is 60,001ms ahead and rejected; the ADD_CARD is exactly 60,000ms ahead (counter 7) and accepted, so the card names a list this replica never saw and shows in Orphaned.",
+  "initial_state": {
+    "cards": {
+      "adds": {},
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {}
+  },
+  "server_time_ms": 1760000000000,
+  "ops": [
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000001",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 0,
+        "physical_ms": 1760000060001,
+        "replica_id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000001",
+      "type": "ADD_LIST",
+      "list_id": "11000000-0000-4000-8000-000000000001",
+      "placement": {
+        "position_key": "a0"
+      },
+      "title": "To Do"
+    },
+    {
+      "op_id": "0e000000-0000-4000-8000-000000000002",
+      "board_id": "b0a4d000-0000-4000-8000-000000000001",
+      "hlc": {
+        "counter": 7,
+        "physical_ms": 1760000060000,
+        "replica_id": "a0000000-0000-4000-8000-000000000002"
+      },
+      "replica_id": "a0000000-0000-4000-8000-000000000002",
+      "type": "ADD_CARD",
+      "card_id": "cc000000-0000-4000-8000-000000000001",
+      "placement": {
+        "list_id": "11000000-0000-4000-8000-000000000001",
+        "position_key": "a0"
+      },
+      "title": "survivor"
+    }
+  ],
+  "expected_rejected": {
+    "0e000000-0000-4000-8000-000000000001": "CLOCK_SKEW"
+  },
+  "expected_collisions": 0,
+  "expected_view": {
+    "lists": [
+      {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "cards": [
+          {
+            "id": "cc000000-0000-4000-8000-000000000001",
+            "position_key": "a0",
+            "title": "survivor"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_state": {
+    "cards": {
+      "adds": {
+        "cc000000-0000-4000-8000-000000000001": [
+          "0e000000-0000-4000-8000-000000000002"
+        ]
+      },
+      "tombstones": []
+    },
+    "lists": {
+      "adds": {},
+      "tombstones": []
+    },
+    "registers": {
+      "cc000000-0000-4000-8000-000000000001": {
+        "title": {
+          "hlc": {
+            "counter": 7,
+            "physical_ms": 1760000060000,
+            "replica_id": "a0000000-0000-4000-8000-000000000002"
+          },
+          "value": "survivor"
+        },
+        "placement": {
+          "hlc": {
+            "counter": 7,
+            "physical_ms": 1760000060000,
+            "replica_id": "a0000000-0000-4000-8000-000000000002"
+          },
+          "value": {
+            "list_id": "11000000-0000-4000-8000-000000000001",
+            "position_key": "a0"
+          }
+        }
+      }
+    }
+  },
+  "expected_state_sha256": "301966d978d29b98e46e136867a01407a50afaa2095d6d8962af4850a36b8ce9"
+}
