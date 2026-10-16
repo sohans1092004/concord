@@ -1,0 +1,662 @@
+# Concord — Engineering Specification v3
+
+Oct 16, 2026 · @Sohan
+
+> Transcribed from `Concord — Engineering Specification v3.pdf`. Tables were rebuilt
+> from the PDF layout; the architecture diagram is described in words. Later
+> changes are recorded in the Amendments log at the end of this document.
+
+## Status and what changed
+
+v3 replaces v1 and v2 completely: build from this document only. It fixes eleven
+correctness gaps found in review, locks the open scope decisions, and cuts Phase 4 to
+what adds new signal beyond Reliant.
+
+Concord is a collaborative structured workspace (boards → lists → cards, like Trello's
+board view), not a rich-text editor. Its core claim: a hand-rolled CRDT engine proven
+convergent by property-based and permutation fuzz tests, running inside an
+actor-per-board distributed system that never acknowledges an edit it has not durably stored.
+
+### Locked decisions
+
+- CRDTs are hand-rolled. No Automerge or Yjs (ADR-000).
+- Server: Java 21. Client: TypeScript + React. The CRDT core is written twice and proven
+  identical by shared golden vectors and cross-language fuzzing (§9). TypeScript-everywhere
+  is the fallback if time runs short (ADR-000b).
+- Snapshots: JSON for v1, compact binary later.
+- Presence: last item in Phase 3.
+
+### Changes from v2
+
+| # | Change | Why |
+|---|---|---|
+| 1 | `board_ops` is unpartitioned in v1; dedup moved to its own key | Postgres requires primary keys and unique constraints on a partitioned table to include the partition key. v2's keys did not, so the table would not compile. |
+| 2 | Server rejects ops whose HLC physical time is more than 60s ahead of server time | A client with a fast clock would otherwise win every LWW contest and drag every later HLC forward. |
+| 3 | Delete wins over a concurrent edit, stated as a rule | v1 said "add wins", but an edit never adds an OR-Set tag, so the claim was contradictory. |
+| 4 | Cards in a deleted list move to a built-in Orphaned list | v2 left them invisible, which broke "no lost edits". |
+| 5 | Write path is persist, then apply | v2 applied to memory first, so a failed append left an unpersisted op in memory and in the next snapshot. |
+| 6 | Fencing token comes from Redis `INCR` and is checked inside the Postgres append transaction | `SET NX` gives no monotonic token, and a Redis failover can briefly create two owners. |
+| 7 | Every broadcast carries a board version; clients detect gaps | Redis Pub/Sub is fire-and-forget; "fixed by the next sync" was undefined. |
+| 8 | Ordering ties break on `(position_key, entity_id)`; no key suffix | The `-replica_id` suffix sat outside the alphabet and complicated every later `keyBetween`. |
+| 9 | Tombstones are kept for the life of the board | GC would break clients offline up to 24 hours; at 2,000 cards the cost is IDs only. |
+| 10 | Ops rejected for lost access are returned to the user, not dropped | Revocation while offline otherwise silently loses edits. |
+| 11 | Gateway-to-owner routing is specified | v2 named it but never said how a gateway finds the owner or what happens during a handover. |
+| 12 | Phase 4 drops Terraform and EKS | Reliant already proves them; the time goes to correctness and outside validation. |
+| 13 | Scale targets split into design targets and measured targets | 50,000 WebSockets cannot be measured meaningfully on one laptop. |
+
+## 1. Requirements
+
+Users on different devices edit the same board at once, see each other's changes within
+200ms, keep working offline for up to 24 hours, and never lose an edit or get asked to pick
+a version.
+
+### 1.1 Functional
+
+- Create boards; invite members as owner, editor or viewer.
+- A board holds ordered lists; a list holds ordered cards.
+- Concurrently, from any session: create, edit (title, description, assignee, labels),
+  reorder, move between lists and delete cards; create, rename, reorder and delete lists.
+- Offline edits merge on reconnect with no conflict dialog.
+- History: who changed what, when, for at least 30 days.
+- Presence: who is viewing the board, and which card they have open.
+
+### 1.2 Non-functional
+
+Targets marked measured must be demonstrated with recorded numbers. Design targets
+shape the architecture but are argued, not claimed as measured, because one laptop
+cannot exercise them honestly.
+
+| Target | Value | Kind |
+|---|---|---|
+| Convergence | Identical state on every replica given the same op set, in any order | Measured (fuzz, §9) |
+| Durability | No ACKed op is ever lost | Measured (chaos drills) |
+| Sync latency, op created → visible on another online client | p95 < 200ms, p99 < 500ms at 2–10 editors | Measured |
+| Editors per board | 30 with correctness; latency recorded | Measured |
+| Cards per board | 2,000 with no client lag (render < 16ms per update) | Measured |
+| Offline window | 24 hours of local edits | Measured |
+| Owner crash recovery | New owner serving within 5s of lease expiry | Measured |
+| Concurrent connections | ~1,000 on one machine | Measured |
+| Fleet scale | 10,000 open boards, ~50,000 connections | Design |
+
+### 1.3 Non-goals
+
+- Character-level collaborative text. Description fields are last-writer-wins as a whole.
+- Caret-level cursors.
+- Moving cards between boards.
+- Unbounded undo. History is a 30-day audit view.
+- SSO, two-factor sign-in, email invites. A sign-in with roles is enough.
+
+## 2. Architecture
+
+Exactly one Session Service instance owns each board at a time and is the only place its
+merge runs; gateways are stateless and forward to that owner. Postgres is the only source
+of truth; Redis carries leases, fan-out and presence, and can be wiped without losing
+anything but presence.
+
+*Architecture diagram (PDF figure): clients, gateways, board owners, Redis, Postgres.*
+One edit's path: client to gateway to the board's owner, commit in Postgres, then publish
+through Redis to every gateway serving that board.
+
+### 2.1 Services
+
+| Service | Does | Never does |
+|---|---|---|
+| Gateway (Java) | WebSocket lifecycle, JWT check on upgrade, frame parsing, owner lookup, forwarding ops, delivering broadcasts to its clients | Holds CRDT state |
+| Session Service (Java) | Owns leased boards: validate, dedup, persist, apply, ACK, broadcast; snapshots; recovery | Talks to clients directly |
+| REST API (Java, may share the gateway process) | Sign-in, boards, membership, cold snapshot, history | Live op traffic |
+| Client (TypeScript, React) | Local replica, optimistic apply, IndexedDB queue, offline mode, rendering | Trusts its own clock beyond §3.1 |
+
+### 2.2 Board actor and threads
+
+Each board is an actor: one mailbox, drained by one thread at a time, so merge code takes
+no locks. Use one virtual thread per active board reading from a `BlockingQueue`. A
+per-instance writer batches appends from all its boards into group commits (§6). Board
+actors never block on each other; a slow board cannot stall another.
+
+### 2.3 Assignment and routing
+
+1. Live Session instances register in Redis: `instances` sorted set, score = last heartbeat,
+   refreshed every 2s, entries older than 6s ignored.
+2. A board's preferred owner is the top instance in rendezvous hashing of `board_id` over
+   live instances. If it is down, the next in that order.
+3. The chosen instance claims the board (§6.3) and writes `board:owner:{id}` →
+   `{instance, address, fence}`.
+4. A gateway caches the owner per board for 5s and forwards ops over one internal
+   WebSocket per instance pair.
+5. An instance that does not own the board answers `NOT_OWNER`. The gateway drops its
+   cache entry, looks the owner up again and resends. Resending is safe because every op
+   carries an `op_id` (§4.3).
+6. The owner publishes each committed op on Redis channel `board:{id}`. A gateway
+   subscribes to a board's channel while it has at least one client on that board.
+
+### 2.4 Handover
+
+On graceful shutdown an owner stops taking ops, flushes the writer, writes a snapshot,
+then deletes its lease so the next instance claims at once. On a crash the lease expires
+after 15s and the next instance claims it. In both cases ops in flight to the old owner fail
+and are resent by the client's pending queue.
+
+## 3. CRDT design
+
+Two CRDTs cover everything: an OR-Set decides which lists and cards exist, and a
+last-writer-wins map holds every attribute, including placement. Every tie breaks on a hybrid
+logical clock. Boards themselves are metadata created over REST, not CRDT state.
+
+### 3.1 Hybrid logical clock
+
+- An HLC is `(physical_ms, counter, replica_id)`, compared in that order. It is a total
+  order consistent with causality. It does not detect concurrency, and nothing in this
+  design relies on it to.
+- `tick()` and `receive(remote)` follow the standard HLC algorithm (Kulkarni et al., 2014).
+- `JOINED` carries server time; the client keeps `offset = server_time - local_time`
+  and uses `local_time + offset` as its physical clock.
+- **Skew guard.** The owner rejects any op whose `physical_ms` is more than 60s ahead of
+  server time, with `ERROR CLOCK_SKEW` and the server time. The client recomputes its
+  offset, re-stamps the op with a new HLC and resends it under the same `op_id`.
+  Without this guard, one fast clock wins every contest it joins.
+- Ops older than the clock are always accepted; age is never a reason to reject.
+
+### 3.2 Existence: OR-Set
+
+- An entity exists while at least one add-tag is not tombstoned. A tag is the `op_id` of the
+  op that added it.
+- `DELETE_*` carries the tags the deleting replica had observed and tombstones exactly
+  those.
+- `RESTORE_*` adds a new tag. That is why this is an OR-Set and not a two-phase set: a
+  restore concurrent with a delete survives, because the delete never observed the
+  restore's tag.
+- Tombstones are kept for the life of the board. At 2,000 cards that is a few hundred KB
+  of IDs.
+
+### 3.3 Rule: delete wins over a concurrent edit
+
+An edit never adds a tag, so it cannot keep a deleted entity alive. The edit is still merged
+into the attribute map; the entity is just not rendered. If the entity is later restored, it
+shows every edit, including those made after the delete. No edit is discarded, only hidden
+while the entity is deleted.
+
+### 3.4 Attributes: LWW map
+
+- Per entity, each key is a register `{value, hlc}`. Merge keeps the higher HLC. Two
+  different values with the same HLC cannot exist: the HLC includes the replica, and a
+  replica never reuses a tick.
+- Card keys: `title`, `description`, `assignee`, `labels` (the whole set as one value),
+  `placement`.
+- List keys: `title`, `placement`.
+
+### 3.5 Placement register
+
+- Card: `placement = {list_id, position_key}`. List: `placement = {position_key}`.
+- Create, move between lists and reorder all write a complete placement in one op with
+  one HLC. No merge can mix one writer's list with another writer's position.
+- Concurrent moves of the same card to different lists: the higher HLC wins whole. The
+  losing client shows a brief "moved by {name}" transition, not a silent jump. This is
+  tested (§9).
+
+### 3.6 Rule: cards in a deleted list
+
+A live card whose `placement.list_id` names a deleted list is shown in a built-in
+Orphaned list. This is a derived view, not a write, so every replica computes the same
+result. Restoring the list returns its cards. Moving a card out of Orphaned is an ordinary
+placement write.
+
+### 3.7 Ordering keys
+
+- Keys use base62 in ASCII order: `0–9`, `A–Z`, `a–z`. Plain byte comparison sorts them in
+  Java and TypeScript alike.
+- `keyBetween(a, b)` follows the rules of Greenspan's fractional-indexing algorithm.
+  `null` means the open start or end. A key never ends in `0`, so there is always room
+  before it.
+- Render order is `(position_key, entity_id)`. Equal keys from concurrent inserts sort
+  by ID, deterministically, with no suffix.
+- Known anomaly: two users inserting several cards into the same gap at once can see
+  them interleave. Acceptable for a board; documented in ADR-001.
+- Rebalance: when a key passes 40 characters, the owner issues ordinary
+  `SET_PLACEMENT` ops with fresh keys under its own replica ID. Because they are normal
+  ops, they converge like any other.
+
+## 4. Operations
+
+Eight op types, each carrying a client-made `op_id`, an HLC and a replica ID. Every op is
+validated before it reaches merge, and a repeated `op_id` gets the original ACK back
+without being applied twice.
+
+### 4.1 Op set
+
+Every op has `op_id` (UUID v4), `board_id`, `hlc`, `replica_id`, `type`, plus:
+
+| Type | Fields | Effect |
+|---|---|---|
+| `ADD_LIST` | `list_id`, `placement`, `title` | New add-tag + initial registers |
+| `ADD_CARD` | `card_id`, `placement`, `title` | New add-tag + initial registers |
+| `SET_FIELD` | `entity_id`, `field`, `value` | One register write. Placement is not allowed here. |
+| `SET_PLACEMENT` | `entity_id`, `placement` | Atomic placement write: move or reorder |
+| `DELETE_LIST` | `list_id`, `observed_tags` | Tombstones those tags |
+| `DELETE_CARD` | `card_id`, `observed_tags` | Tombstones those tags |
+| `RESTORE_LIST` | `list_id` | New add-tag |
+| `RESTORE_CARD` | `card_id` | New add-tag |
+
+An `ADD_*` for an ID that already exists is invalid. Entity IDs are UUIDs made once by the
+creating client.
+
+### 4.2 Validation (owner, before persisting)
+
+1. Schema: known type, required fields, types, title ≤ 200 chars, description ≤ 10,000,
+   ≤ 20 labels.
+2. Authorization: the sender's role on this board, re-read per op from a 30s membership
+   cache that is cleared when membership changes. Viewers can submit no ops.
+3. Clock: §3.1 skew guard.
+4. References: `SET_PLACEMENT` and `ADD_CARD` must name a list that has existed on this
+   board (live or deleted, per §3.6).
+5. Key sanity: a `position_key` is 1–64 base62 characters and does not end in `0`.
+
+A failed check returns `ERROR {code, op_id}`. Nothing is stored or broadcast. Rejected
+ops are logged with the user and reason.
+
+### 4.3 Idempotency
+
+1. Each board actor keeps an LRU of its last 10,000 `op_id` → ACK. A hit returns the
+   stored ACK.
+2. The backstop is the primary key `(board_id, op_id)` on `board_ops`, appended with
+   `ON CONFLICT DO NOTHING`. On conflict the owner reads the stored version and returns
+   the original ACK.
+3. Duplicates are never re-broadcast. A metric counts them.
+
+### 4.4 CRDT module layout
+
+Same layout in `crdt-java/` and `crdt-ts/`, with no networking or storage code:
+
+| Module | Exposes |
+|---|---|
+| `hlc` | `tick`, `receive`, `compare`, `encode` |
+| `op` | op types, `validateShape`, `newOpId` |
+| `orset` | `add`, `remove(observed)`, `contains`, `merge` |
+| `lww` | `set`, `get`, `merge` |
+| `keys` | `keyBetween`, `rebalance` |
+| `board` | `apply(op)`, `merge(state, state)`, `view()` (lists, cards in order, Orphaned), `encode` / `decode` |
+
+## 5. Data
+
+Postgres holds every op, snapshot and membership; Redis holds only what can be lost. If
+Redis is wiped, everything except presence is rebuilt from Postgres.
+
+### 5.1 Postgres schema
+
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,         -- scrypt or argon2id
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE boards (
+    id UUID PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_by UUID NOT NULL REFERENCES users(id),
+    version BIGINT NOT NULL DEFAULT 0,   -- last committed op version
+    fence BIGINT NOT NULL DEFAULT 0,     -- highest owner fence seen
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE board_members (
+    board_id UUID REFERENCES boards(id),
+    user_id UUID REFERENCES users(id),
+    role TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+    PRIMARY KEY (board_id, user_id)
+);
+
+-- Not partitioned in v1. If volume ever needs it: PARTITION BY HASH (board_id),
+-- which keeps both keys legal because both include board_id.
+CREATE TABLE board_ops (
+    board_id UUID NOT NULL REFERENCES boards(id),
+    op_id UUID NOT NULL,
+    version BIGINT NOT NULL,
+    type TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    hlc_physical_ms BIGINT NOT NULL,
+    hlc_counter INT NOT NULL,
+    replica_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    fence BIGINT NOT NULL,
+    committed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (board_id, op_id),
+    UNIQUE (board_id, version)
+);
+CREATE INDEX board_ops_history ON board_ops (board_id, committed_at DESC);
+
+CREATE TABLE board_snapshots (
+    board_id UUID NOT NULL REFERENCES boards(id),
+    version BIGINT NOT NULL,             -- last op version included
+    state JSONB NOT NULL,
+    sha256 TEXT NOT NULL,                -- checked on load
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (board_id, version)
+);
+```
+
+Version is a per-board counter assigned by the owner at commit. It orders broadcasts
+and lets clients detect gaps (§6.4). It is not used for merge; the HLC is.
+
+Snapshots are written every 500 ops or 60s of activity, whichever comes first. The last
+three per board are kept.
+
+Op retention: ops older than 35 days and at or below the latest snapshot's version are
+deleted daily. History covers 30 days. A client behind the oldest kept op gets a full
+snapshot (§7).
+
+### 5.2 Redis
+
+| Key | Holds | Lifetime |
+|---|---|---|
+| `instances` (sorted set) | Live Session instances, score = heartbeat time | Entries ignored after 6s |
+| `board:lease:{id}` | `{instance}:{fence}`, set with `NX PX 15000` | 15s, renewed every 5s |
+| `board:fence:{id}` | Counter, `INCR` on every claim | Permanent; rebuilt from `boards.fence` if lost |
+| `board:owner:{id}` | `{instance, address, fence}` for gateway lookup | Same as the lease |
+| `board:{id}` (channel) | Committed ops for fan-out | Ephemeral |
+| `presence:{id}` (sorted set) | Member = `user:card:state`, score = last seen | Swept every 10s, entries older than 30s removed |
+| `rl:{connection}` | Token bucket, as Reliant's Lua script | Expires when idle |
+
+## 6. Write path and ownership
+
+An op is accepted only when its Postgres transaction commits, and that transaction also
+checks the owner's fence, so a stale owner can neither store nor broadcast anything.
+Memory is updated only after the commit.
+
+### 6.1 Write path
+
+1. The op enters the board actor's mailbox.
+2. Dedup (§4.3), then validate (§4.2). On failure, reply and stop.
+3. The actor's writer collects ops for up to 15ms (tunable), then runs one transaction for
+   this board:
+   1. Drop any `op_id` already in `board_ops` for this board. This catches duplicates the
+      LRU missed; their stored ACKs are returned after commit.
+   2. `UPDATE boards SET fence = :fence, version = version + :n WHERE id = :board AND fence <= :fence RETURNING version`,
+      where `:n` counts the remaining ops. Zero rows means a newer owner exists (§6.3).
+   3. Insert the ops with consecutive versions ending at the returned version.
+4. After commit: apply each op to memory, store its ACK in the LRU, send
+   `OP_ACK {op_id, version}` to the sender, publish `{op, version}` on `board:{id}`.
+5. If the transaction fails or takes over 2s: apply nothing, ACK nothing, reply
+   `ERROR RETRY_LATER`. The client keeps the op queued (§7). Other clients see no new ops on
+   this board until Postgres returns. That is the deliberate price of never acknowledging
+   an unsaved edit (ADR-005).
+
+Applying after commit costs nothing in correctness: merge is commutative, so the order
+of apply does not matter. Applying first, as v2 did, would leave an unsaved op in memory
+and in the next snapshot.
+
+### 6.2 Claiming a board
+
+1. Read `boards.fence` from Postgres. `INCR board:fence:{id}`; if the result is not
+   greater than `boards.fence`, set the counter to `boards.fence + 1` first. This survives
+   a Redis wipe.
+2. `SET board:lease:{id} {instance}:{fence} NX PX 15000`. If it fails, someone else
+   owns the board; return `NOT_OWNER`.
+3. Load the latest snapshot. If its SHA-256 does not match, use the previous one and
+   alert.
+4. Replay ops with a higher version, in version order.
+5. Write `board:owner:{id}`, start renewing the lease every 5s with a compare-and-extend
+   Lua script, and start serving.
+
+Target: serving within 5s of the claim for a board of 2,000 cards with a 500-op tail.
+
+### 6.3 Fencing
+
+- Safety rests on Postgres, not Redis. A Redis failover can lose a lease and briefly let two
+  instances both believe they own a board. Only the one with the higher fence can
+  commit (§6.1 step 3.2). The other gets zero rows, drops the board at once and answers
+  `NOT_OWNER` from then on.
+- Because broadcast happens only after commit, a fenced-out owner can never
+  broadcast either.
+- If lease renewal fails because Redis is unreachable, the owner keeps serving. Postgres
+  still fences it. Boards with no owner cannot be claimed until Redis returns; their clients
+  get `UNAVAILABLE` and retry.
+
+### 6.4 Versions and gap detection
+
+- Every broadcast carries its board version. A client that receives version `v` when it last
+  had `v - 2` or lower sends `SYNC_REQUEST {since_version}` before applying anything
+  newer.
+- Every 5s the owner publishes `BOARD_VERSION {version}`. A quiet client that is behind
+  notices within 5s.
+- If Redis Pub/Sub is down, each gateway polls the owner once a second for ops newer
+  than the last version it delivered, for each board it serves. Fan-out keeps working, just
+  slower.
+
+## 7. Client and offline sync
+
+The client applies every edit at once, stores it in IndexedDB until the server ACKs it, and
+never discards an unacknowledged edit, whatever the server sends back.
+
+### 7.1 Local state
+
+- Confirmed replica: state built only from server-confirmed ops, plus its board version.
+- Pending queue: the client's own ops not yet ACKed, in creation order.
+- View = confirmed replica with the pending ops applied on top, updated incrementally.
+  When an op is rejected, it is removed from the queue and the view is rebuilt. Nothing
+  optimistic ever needs undoing by hand.
+- IndexedDB stores the confirmed replica, its version, the pending queue, the replica ID
+  and the HLC. A reload resumes exactly where the tab left off.
+- Each tab is its own replica with its own ID, so two tabs never share an HLC sequence.
+  On start, a tab takes over the queues of closed tabs, using the Web Locks API so only
+  one tab adopts each queue.
+
+### 7.2 Edit
+
+1. Make the op: new `op_id`, `hlc.tick()`.
+2. Append it to the pending queue in IndexedDB.
+3. Update the view.
+4. If connected, send it. If not, it waits.
+
+### 7.3 Reconnect
+
+1. Reconnect with backoff: 0.5s × 2, capped at 30s, full jitter.
+2. Send `JOIN {board_id, since_version}`.
+3. The server replies with ops after that version, or with a full snapshot if the client is
+   more than 2,000 ops behind or behind the oldest kept op.
+4. Merge them into the confirmed replica. A snapshot replaces the confirmed replica; the
+   pending queue is untouched.
+5. Resend the whole pending queue. The server dedups by `op_id`.
+6. Remove each op from the queue on its ACK.
+
+Ops arrive from the server in version order, and the owner checks references before
+committing, so a client never sees a move before the add it refers to.
+
+### 7.4 Rejections
+
+| Error | Client does |
+|---|---|
+| `CLOCK_SKEW` | Recompute the clock offset from the server time in the error, re-stamp the op, resend under the same `op_id` |
+| `RETRY_LATER`, `UNAVAILABLE` | Keep the op; retry with backoff |
+| `INVALID_OP` | Remove it from the queue and log it; this is a client bug |
+| `UNAUTHORIZED` (access revoked while offline) | Move the op to an Unsent edits panel the user can read and export as JSON. It is never silently dropped. |
+
+### 7.5 WebSocket protocol
+
+JSON frames for v1.
+
+| Direction | Message | Fields |
+|---|---|---|
+| Client → server | `JOIN` | `board_id`, `since_version` (null on first open) |
+| Client → server | `OP` | `op` |
+| Client → server | `SYNC_REQUEST` | `board_id`, `since_version` |
+| Client → server | `PRESENCE` | `board_id`, `card_id` or null, `state` |
+| Server → client | `JOINED` | `ops` or `snapshot`, `version`, `server_time_ms`, `role` |
+| Server → client | `OP_ACK` | `op_id`, `version` |
+| Server → client | `OP_BROADCAST` | `op`, `version` |
+| Server → client | `BOARD_VERSION` | `version` |
+| Server → client | `SYNC` | `ops` or `snapshot`, `version` |
+| Server → client | `PRESENCE_UPDATE` | `user_id`, `card_id`, `state` |
+| Server → client | `RECONNECT_ELSEWHERE` | sent before a gateway drains |
+| Server → client | `ERROR` | `code`, `op_id`, `detail`, and `server_time_ms` for `CLOCK_SKEW` |
+
+## 8. Failure scenarios
+
+Every scenario either keeps edits flowing or pauses them; none loses an acknowledged
+edit. Those marked drill are induced on purpose in Phase 4 and written up as
+postmortems, the way Reliant's were.
+
+| # | Failure | Handling | Drill |
+|---|---|---|---|
+| 1 | Gateway crashes | Clients reconnect with backoff to another gateway and resend their pending queues | Yes |
+| 2 | Owner crashes | Lease expires within 15s; the next instance claims, loads snapshot + tail, serves within 5s; clients resend | Yes |
+| 3 | Two owners at once (Redis failover, or an owner paused past its lease) | The stale owner's commit updates zero rows; it drops the board and answers `NOT_OWNER`. It never broadcast anything uncommitted | Yes (pause an owner with `docker pause`, as in Reliant's incident 004) |
+| 4 | Postgres down | Owners commit nothing, ACK nothing, return `RETRY_LATER`; clients keep editing locally; cross-client sync for new ops pauses until Postgres returns | Yes |
+| 5 | Redis down | Owners keep serving (Postgres fences them); gateways switch to polling owners; presence is lost; unowned boards wait | Yes |
+| 6 | Redis wiped and restarted empty | Fence counters rebuild from `boards.fence`; leases are reclaimed; nothing durable is lost | Yes |
+| 7 | Pub/Sub message lost | Client sees a version gap or a `BOARD_VERSION` ahead of it and sends `SYNC_REQUEST` | Fault injection in tests |
+| 8 | Client offline 24 hours | Snapshot or op range on reconnect; pending queue merged on top and resent | Load test |
+| 9 | Same op sent many times | LRU or primary key dedup; original ACK returned; no re-broadcast | Tests |
+| 10 | Client clock far ahead | `CLOCK_SKEW`; client corrects its offset and re-stamps | Tests |
+| 11 | Access revoked while offline | Ops rejected and shown in Unsent edits, never silently dropped | Tests |
+| 12 | Malformed or malicious op | Rejected before persist; logged with user and reason | Tests |
+| 13 | Snapshot corrupt | Checksum mismatch; previous snapshot + longer tail; alert | Tests |
+| 14 | Reconnect storm (gateway with 500 clients restarts) | Client jitter; per-gateway connection-rate limit; snapshot reads served from memory | Yes |
+| 15 | Rolling deploy | Gateway sends `RECONNECT_ELSEWHERE` and drains; owner flushes, snapshots and releases its lease (§2.4) | Yes |
+
+## 9. Testing, security and observability
+
+The convergence fuzz suite and the cross-language conformance suite are the project's
+main correctness claim, and both gate every merge in CI.
+
+### 9.1 Property tests (jqwik in Java, fast-check in TypeScript)
+
+- `orset`, `lww`, `board`: `merge(A, B) = merge(B, A)`, `merge(merge(A, B), C) = merge(A, merge(B, C))`,
+  `merge(A, A) = A`, over random states.
+- `keys`: for random `a < b`, `a < keyBetween(a, b) < b`; no key ends in `0`; `null`
+  bounds work.
+- `hlc`: tick is strictly increasing; receive exceeds both inputs.
+- Permutation fuzz: generate 50–500 random ops across 3–5 simulated replicas,
+  deliberately heavy on concurrent moves of the same card, delete versus edit, delete
+  versus restore, and inserts into the same gap. Deliver them to each replica in a
+  different random order, with random duplicates. Assert byte-identical canonical state.
+- CI runs 500 seeds per commit; a nightly job runs 100,000. Every failing seed is shrunk
+  and saved as a permanent regression test.
+
+### 9.2 Cross-language conformance
+
+- Canonical state encoding: JSON with sorted keys (RFC 8785), so equal states give
+  equal bytes and an equal SHA-256.
+- `conformance/vectors/*.json`: an initial state, an op list and the expected view and
+  state hash. At least 50 hand-written vectors, one per rule in §3, plus every shrunk fuzz
+  failure.
+- Differential fuzz: the TypeScript fuzzer feeds the same op sequence to the Java core
+  through a small CLI and compares state hashes. Any difference fails CI.
+
+### 9.3 Integration and end-to-end tests
+
+- No ACK before commit: inject a commit failure and assert no ACK, no broadcast and no
+  memory change.
+- Fencing: two owners, the stale one's write rejected. The test must fail with the fence
+  check removed.
+- Dedup, gap detection, clock-skew rejection, revocation into Unsent edits, Orphaned
+  list, snapshot checksum fallback.
+- Board isolation: no op, presence or history from board X ever reaches a client of board
+  Y.
+- Playwright: two browser contexts editing one board, one taken offline, both converging
+  after reconnect.
+
+### 9.4 Security
+
+- JWTs live 15 minutes and are scoped to the user; board role is checked per op (§4.2), so
+  removal takes effect on the next op, not the next connect.
+- The WebSocket upgrade checks `Origin` against an allowlist, preventing cross-site
+  WebSocket hijacking.
+- Rate limit per connection: 20 ops/s, burst 50. Frames over 64 KB are rejected.
+- Passwords hashed with argon2id. Sessions stored hashed, as in Reliant.
+
+### 9.5 Observability
+
+| Kind | What |
+|---|---|
+| Metrics | Sync latency (client-reported op created → seen elsewhere), commit latency and group-commit batch size, ops/s per board, duplicates, rejections by code, LWW ties actually decided, ownership claims and fence rejections, version gaps detected, connections per gateway, snapshot size and duration, recovery time |
+| Logs | JSON lines with `board_id`, `op_id`, `user_id` where known: connections, rejections, claims, fence rejections, snapshot failures |
+| Traces | OpenTelemetry: client send → gateway → owner → commit → broadcast → peer render |
+| Alerts | Sync p95 > 200ms for 5 min; commit failures; any fence rejection; claim churn above normal; version-gap rate above normal; reconnect storm |
+
+## 10. Phases
+
+Four phases, each ending in a demonstrable artifact. Phase 1 has no networking at all: the
+engine is proven correct before any distributed code exists. Phases 1–3 carry almost all of
+the new signal; Phase 4 deliberately reuses what Reliant already proved.
+
+1. **CRDT engine, both languages.** `hlc`, `op`, `orset`, `lww`, `keys`, `board` in Java and
+   TypeScript; canonical encoding; property tests; permutation fuzz; ≥ 50 conformance
+   vectors; differential fuzz. ADR-000, 000b, 001, 002 written.
+   *Exit:* 500-seed fuzz and differential fuzz green in CI; 100,000-seed nightly run green;
+   `crdt-ts` publishable as a standalone package with its tests.
+2. **Distributed system.** Gateway, Session Service with board actors, write path (§6.1),
+   claiming and fencing (§6.2–6.3), versions and gap detection, snapshots, recovery. Runs
+   in docker compose: 2 gateways, 3 Session instances, Postgres, Redis.
+   *Exit:* two clients on different gateways converge; killing an owner recovers within 5s
+   with every ACKed op present in `board_ops`; the fencing test fails when the fence
+   check is removed.
+3. **Product.** React board UI, IndexedDB and offline mode (§7), sign-in and roles, history
+   view, Unsent edits, Orphaned list, then presence.
+   *Exit:* two browsers edit one board, one goes offline for an hour, both converge with
+   no devtools involved. Then at least one real group (a club, a class project, friends'
+   side project) uses it for two weeks, and the bugs they hit are logged.
+4. **Operations, reusing Reliant's patterns.** Docker images; multi-instance docker
+   compose; the §9 suites as CI gates; metrics, logs, traces and alerts; the measurements
+   below; the drills from §8 written up as postmortems; ADRs complete; one public write-up.
+   *Exit:* measurements recorded in `production/load-tests/`; every drill has a
+   postmortem in `production/incident-reports/`; a single-VM public demo, as in
+   Reliant's `deploy/`.
+
+Not in scope for Phase 4: Terraform, EKS, managed AWS services. Reliant shows them
+already; say so in interviews rather than build them twice.
+
+### 10.1 Measurements
+
+All on one machine, reported like Reliant's: where the bottlenecks sit, not capacity.
+
+| Test | Setup | Pass |
+|---|---|---|
+| Baseline sync latency | 2 clients, 1 board, 1 op/s each | p95 < 200ms |
+| Editors per board | Ramp 2 → 30 editors on one board, 1 op/s each | Correct state at 30; p95 recorded at each step, and the point where it passes 200ms named |
+| Commit batching | Same load, group-commit window 0, 5, 15, 30ms | Latency and commits/s per setting recorded; chosen value justified in ADR-005 |
+| Many boards | 1,000 connections across 300 boards, 3 editors each | Throughput, CPU and memory per Session instance recorded |
+| Large board | 2,000 cards, 10 editors | Client render < 16ms per update |
+| Offline merge | Client offline 1h, 8h and 24h at realistic edit rates | Converged, nothing lost, reconnect time recorded |
+| Owner crash | Kill the owner mid-load | Serving within 5s of lease expiry; every ACKed op in `board_ops` |
+| Stale owner | Pause the owner past its lease, then resume | Zero commits from the stale owner; its clients recover |
+| Reconnect storm | Restart a gateway holding 500 connections | No cascading failure; time until all reconnected recorded |
+
+## 11. Decisions
+
+Ten ADRs, each one page in `docs/adr/` (context, decision, alternatives, consequences).
+Four are decided in this spec; the rest record choices made or measured during the build.
+
+| ADR | Decision | State |
+|---|---|---|
+| 000 | Hand-roll the CRDTs; no Automerge or Yjs | Decided |
+| 000b | Java 21 server, TypeScript client, conformance suite between them; TypeScript everywhere as fallback | Decided; confirm before Phase 1 |
+| 001 | String fractional keys, ties broken by `(key, entity_id)`, interleaving accepted | Decided |
+| 002 | One atomic placement register, not separate list and position fields | Decided |
+| 003 | Delete wins over concurrent edits; restore via new tag; cards of a deleted list shown in Orphaned | Write during Phase 1 |
+| 004 | Actor per board instead of stateless merge-on-read | Write during Phase 2 |
+| 005 | ACK only after commit; group-commit window chosen from measurements | Write after the batching test |
+| 006 | Redis Pub/Sub, not Kafka, for fan-out: low latency, no durability needed because Postgres and versions cover gaps (contrast with Reliant) | Write during Phase 2 |
+| 007 | Fence in Postgres, not Redis; owners keep serving while Redis is down | Write during Phase 2 |
+| 008 | Snapshot every 500 ops or 60s, keep three | Write after the recovery test |
+
+### 11.1 Open before Phase 1
+
+- Confirm ADR-000b. If time is short, choose TypeScript everywhere: §9.2 then shrinks
+  to golden vectors only, and the server's threading story becomes Node's event loop.
+- Pick the HLC encoding for JSON (three fields, not a packed string) so both languages
+  agree from the first vector.
+- Write the first ten conformance vectors by hand before writing either implementation.
+
+### 11.2 Open before Phase 2
+
+- Check the 10,000-entry LRU against measured ops per board per minute.
+- Decide where the public demo will run (a small VM, as with Reliant).
+
+## Amendments log
+
+Changes approved after v3 was issued. Each entry names the section it changes; the
+section text itself is updated in the same commit.
+
+| # | Date | Sections | Change |
+|---|---|---|---|
