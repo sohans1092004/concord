@@ -109,9 +109,12 @@ through Redis to every gateway serving that board.
 ### 2.2 Board actor and threads
 
 Each board is an actor: one mailbox, drained by one thread at a time, so merge code takes
-no locks. Use one virtual thread per active board reading from a `BlockingQueue`. A
-per-instance writer batches appends from all its boards into group commits (§6). Board
-actors never block on each other; a slow board cannot stall another.
+no locks. Use one virtual thread per active board reading from a `BlockingQueue`. Each
+board's actor is also its writer: it batches that board's appends into group commits
+(§6.1 step 3) over a connection pool shared by the instance's boards. Board actors never
+block on each other; a slow board cannot stall another. Time spent waiting for a pool
+connection counts toward the 2s commit timeout (§6.1 step 5); pool sizing is measured in
+Phase 4.
 
 ### 2.3 Assignment and routing
 
@@ -308,7 +311,21 @@ and adds the tag `op_id`; `RESTORE_*` adds the tag `op_id`; `DELETE_*` tombstone
    cache that is cleared when membership changes. Viewers can submit no ops.
 3. Clock: §3.1 skew guard.
 4. References: `SET_PLACEMENT` and `ADD_CARD` must name a list that has existed on this
-   board (live or deleted, per §3.6).
+   board (live or deleted, per §3.6). Also, each rejected as `INVALID_OP`:
+   - `ADD_LIST` and `ADD_CARD` must name an ID never added before, as a list or a card.
+   - `SET_FIELD`, `SET_PLACEMENT`, `DELETE_*` and `RESTORE_*` must name an entity of the
+     matching kind (list or card) that has existed on this board.
+   - A list takes only `SET_FIELD title`, and the list form of placement; a card takes the
+     card form.
+   - "Has existed" includes ops admitted to the board's current, uncommitted batch, so an
+     `ADD_LIST` and the `ADD_CARD` into it may share one group commit.
+
+   These are server admission rules only. The engine's merge still accepts any op in any
+   order, as the fuzzer requires; a client applying broadcast ops never checks them.
+   Dedup comes first (§6.1 step 2): before rejecting an op for any reason but
+   `RETRY_LATER`, the owner looks its `op_id` up in `board_ops`, and if it is stored (an op
+   committed before a failover, resent to a new owner whose LRU is empty) returns its
+   original ACK instead.
 5. Key sanity: a `position_key` is 1–64 base62 characters and passes Greenspan's full
    key check: the head character is `a`–`z` or `A`–`Z`, the integer part has the length
    that head requires, the fractional part does not end in `0`, and the key is not the
@@ -467,8 +484,10 @@ Memory is updated only after the commit.
    this board:
    1. Drop any `op_id` already in `board_ops` for this board. This catches duplicates the
       LRU missed; their stored ACKs are returned after commit.
-   2. `UPDATE boards SET fence = :fence, version = version + :n WHERE id = :board AND fence <= :fence RETURNING version`,
-      where `:n` counts the remaining ops. Zero rows means a newer owner exists (§6.3).
+   2. `UPDATE boards SET version = version + :n WHERE id = :board AND fence = :fence RETURNING version`,
+      where `:n` counts the remaining ops. Equality, not `<=`: the claim already wrote this
+      owner's fence (§6.2 step 3), so only the current owner may commit. Zero rows means a
+      newer owner exists (§6.3).
    3. Insert the ops with consecutive versions ending at the returned version.
 4. After commit: apply each op to memory, store its ACK in the LRU, send
    `OP_ACK {op_id, version}` to the sender, publish `{op, version}` on `board:{id}`.
@@ -477,22 +496,43 @@ Memory is updated only after the commit.
    this board until Postgres returns. That is the deliberate price of never acknowledging
    an unsaved edit (ADR-005).
 
+   A failure or timeout leaves the outcome unknown: the COMMIT may have been applied with
+   its reply lost. So the actor then *reconciles* before serving again: it locks the board
+   row (`SELECT … FOR UPDATE`, which waits out any of its own transactions still holding
+   it), reads every op with a version above its own, applies them and publishes them. Until
+   that succeeds it answers every request with `RETRY_LATER`, takes no snapshots, and
+   retries the reload with backoff. A client's resend of such an op then gets the original
+   ACK from the LRU, so it is applied, published and ACKed exactly once. If the board's
+   fence has changed meanwhile, the actor drops the board instead (§6.3).
+
 Applying after commit costs nothing in correctness: merge is commutative, so the order
 of apply does not matter. Applying first, as v2 did, would leave an unsaved op in memory
 and in the next snapshot.
 
 ### 6.2 Claiming a board
 
-1. Read `boards.fence` from Postgres. `INCR board:fence:{id}`; if the result is not
-   greater than `boards.fence`, set the counter to `boards.fence + 1` first. This survives
-   a Redis wipe.
+1. Read `boards.fence` from Postgres. In one Lua script: `INCR board:fence:{id}`, and if
+   the result is not greater than `boards.fence`, set the counter to `boards.fence + 1` and
+   use that. Atomic, so two claimers never get the same fence; survives a Redis wipe.
 2. `SET board:lease:{id} {instance}:{fence} NX PX 15000`. If it fails, someone else
    owns the board; return `NOT_OWNER`.
-3. Load the latest snapshot. If its SHA-256 does not match, use the previous one and
+3. `UPDATE boards SET fence = :fence WHERE id = :board AND fence < :fence`. Zero rows: a
+   higher fence reached Postgres first; release the lease and retry from step 1. This comes
+   after the lease, so a claimer that loses the lease race never fences out the live owner,
+   and before the load, so from this commit on no older fence can commit (§6.1 step 3.2)
+   and the replay below sees every op an older owner ever committed.
+4. Load the latest snapshot. If its SHA-256 does not match, use the previous one and
    alert.
-4. Replay ops with a higher version, in version order.
-5. Write `board:owner:{id}`, start renewing the lease every 5s with a compare-and-extend
-   Lua script, and start serving.
+5. Replay ops with a higher version, in version order.
+6. Write `board:owner:{id}`, start renewing the lease every 5s with a compare-and-extend
+   Lua script, and start serving. If renewal finds the lease gone (expired, or Redis
+   wiped), it re-takes it with the same value; Postgres still fences this owner, so this
+   is safe. If another instance holds it, the owner drops the board.
+
+Why step 3 exists: without it the new owner's fence reaches Postgres only with its first
+commit. An old owner paused past its lease could still commit with `fence <= :fence`
+after the new owner had loaded, and the new owner's memory and snapshots would then skip
+an acknowledged op. `FencingTest` replays exactly that interleaving.
 
 Target: serving within 5s of the claim for a board of 2,000 cards with a 500-op tail.
 
@@ -863,3 +903,4 @@ section text itself is updated in the same commit.
 | 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |
 | 4 | 2026-10-16 | §3.2, §4.1, §4.2, §7.4, §9.2.3 | Tombstones are per entity, `{entity_id: [tags]}`, so a delete naming X only tombstones (X, tag) pairs (closes the cross-card delete found in Phase 1; vectors 051–054). Approved: `hlc.replica_id` must equal `replica_id`; lone surrogates rejected; state decode checks placement shape. NFC table mismatch documented as a known limitation. `INVALID_OP` moves the op to Unsent edits instead of dropping it. The server is the only parser of client JSON and rejects duplicate member names. |
 | 5 | 2026-10-16 | §4.2, §5.1 | `validateShape` rejects U+0000 in every string (Postgres JSONB cannot store it), in both cores; vector 050 now uses U+0001 and vector 055 pins the rejection. Snapshot `sha256` is over the canonical re-encoding of the loaded state, since JSONB does not keep bytes. |
+| 6 | 2026-10-16 | §2.2, §4.2, §6.1, §6.2 | (A) Claim order: atomic floor-and-INCR, lease, then `UPDATE boards SET fence … WHERE fence < :fence` before loading; commits require `fence = :fence`. (B) After a failed or timed-out commit the actor reconciles from `board_ops` under the board row lock before serving, answering `RETRY_LATER` and taking no snapshots meanwhile. (D) One writer per board actor over a shared pool; pool wait counts toward the 2s timeout. (E) Admission rules: ADD of an existing ID, references of the right kind, list fields and placement form; server-only, merge still accepts any order; dedup by `board_ops` before any rejection. |
