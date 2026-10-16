@@ -48,12 +48,12 @@ class SlowConsumerTest {
             writer.join(b.id(), null);
             Ops ops = new Ops(b.id());
             String list = Ops.uuid();
-            writer.op(ops.addList(list, "a0", "L"));
+            ack(writer, ops.addList(list, "a0", "L"));
             List<String> keys = Keys.keysBetween(null, null, 40);
             for (int i = 0; i < 40; i++) {
                 String card = Ops.uuid();
-                writer.op(ops.addCard(card, list, keys.get(i), "c" + i));
-                assertEquals("OP_ACK", writer.op(ops.setField(card, "description", "d".repeat(9_000))).get("type"));
+                ack(writer, ops.addCard(card, list, keys.get(i), "c" + i));
+                ack(writer, ops.setField(card, "description", "d".repeat(9_000)));
             }
 
             try (Socket stalled = new Socket()) {
@@ -88,6 +88,17 @@ class SlowConsumerTest {
             // The writer, which reads, is unaffected.
             assertEquals("OP_ACK", writer.op(ops.setField(list, "title", "still fine")).get("type"));
         }
+    }
+
+    /** Sends an op, resending it like a client would while the 20/s rate limit refuses it. */
+    static void ack(WsClient c, Map<String, Object> op) throws Exception {
+        for (int i = 0; i < 50; i++) {
+            Map<String, Object> r = c.op(op);
+            if ("OP_ACK".equals(r.get("type"))) return;
+            assertEquals("RETRY_LATER", r.get("code"), () -> "got " + r);
+            Thread.sleep(100);
+        }
+        throw new AssertionError("still rate limited after 5s");
     }
 
     @SuppressWarnings("unchecked")
