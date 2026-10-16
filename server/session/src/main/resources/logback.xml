@@ -1,7 +1,7 @@
 <configuration>
   <!-- JSON lines (SPEC §9.5): key-values such as board_id, op_id and user_id become fields. -->
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+    <encoder class="dev.concord.common.RedactingJsonEncoder">
       <withFormattedMessage>true</withFormattedMessage>
       <withMessage>false</withMessage>
       <withArguments>false</withArguments>

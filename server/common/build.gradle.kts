@@ -11,5 +11,5 @@ dependencies {
     api("com.auth0:java-jwt:${v["jwt"]}")
     api("org.slf4j:slf4j-api:${v["slf4j"]}")
     api("io.javalin:javalin:${v["javalin"]}") // Jetty WebSocket sessions, for Outbox
-    runtimeOnly("ch.qos.logback:logback-classic:${v["logback"]}")
+    api("ch.qos.logback:logback-classic:${v["logback"]}") // RedactingJsonEncoder
 }

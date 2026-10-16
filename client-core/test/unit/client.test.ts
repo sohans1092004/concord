@@ -299,6 +299,34 @@ describe("client-core", () => {
     expect(client.view().lists[0]!.cards).toHaveLength(0);
   });
 
+  it("the access token goes in the connect URL but never into a log event (amendment 10)", async () => {
+    vi.useFakeTimers();
+    try {
+      const token = "eyJsecret.token-value.never-logged";
+      const events: string[] = [];
+      const sockets: FakeSocket[] = [];
+      const client = await SyncClient.open({
+        urls: ["ws://g1/ws", "ws://g2/ws"], boardId: BOARD, token: () => token, random: () => 0,
+        log: (event, data) => events.push(JSON.stringify({ event, data })),
+        connect: (url) => {
+          const s = new FakeSocket(url);
+          sockets.push(s);
+          return s;
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets[0]!.url).toContain(encodeURIComponent(token));
+      await vi.advanceTimersByTimeAsync(JOIN_TIMEOUT_MS + 1); // join_timeout and reconnect_scheduled log the URL
+      sockets[1]!.close(); // and a dropped connection
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(events.length).toBeGreaterThan(2);
+      for (const e of events) expect(e).not.toContain("secret");
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("backoff is 0.5s × 2^attempt, capped at 30s, full jitter", () => {
     expect(backoffMs(0, () => 1)).toBe(500);
     expect(backoffMs(3, () => 1)).toBe(4_000);

@@ -810,6 +810,14 @@ independent of both cores.
 
 - JWTs live 15 minutes and are scoped to the user; board role is checked per op (§4.2), so
   removal takes effect on the next op, not the next connect.
+- In Phase 2 the client passes its JWT in the WebSocket URL, `?access_token=…` (browsers
+  cannot set headers on a WebSocket). A token must never appear in any log: Concord's code
+  logs `user_id`, never the token, and every log line is written by an encoder that redacts
+  `access_token=` values and anything shaped like a JWT, which catches libraries that log
+  request lines at DEBUG (`GatewayLogTest`; client-core's log events are tested the same
+  way). Phase 3 replaces the URL token with a single-use ticket valid for 30s, issued by
+  the REST API to a signed-in session, so a URL that leaks is worthless by the time anyone
+  reads it.
 - The WebSocket upgrade checks `Origin` against an allowlist, preventing cross-site
   WebSocket hijacking.
 - The internal gateway ↔ owner WebSocket (§2.3 step 4) requires a shared secret, sent by the
@@ -922,3 +930,4 @@ section text itself is updated in the same commit.
 | 7 | 2026-10-16 | §5.2, §9.4 | (F) The per-connection token bucket lives in the gateway's memory; the `rl:{connection}` Redis key is removed. |
 | 8 | 2026-10-17 | §5.2, §6.2, §9.4 | Claim order confirmed: floor-and-INCR → `SET NX` lease → `UPDATE boards SET fence` → load → serve (already the §6.2 text). The `membership` invalidation channel added to §5.2. The internal gateway ↔ owner socket requires a shared-secret header (`CONCORD_INTERNAL_SECRET`). |
 | 9 | 2026-10-17 | §2.2 | Every queue is bounded: actor mailbox (5,000; then `RETRY_LATER`), gateway → client unsent bytes (8 MB; then `RECONNECT_ELSEWHERE` and close), gateway requests per connection (256), owner → gateway unsent bytes (64 MB; then the socket is cut), Redis command queue (10,000). |
+| 10 | 2026-10-17 | §9.4 | The Phase 2 client choices (head-of-queue `INVALID_OP`, in-order queue resend, 10s JOIN timeout, fresh replica after a clock correction) and gateway choices (one board per connection, `access_token` query parameter, Origin optional but token required, `RETRY_LATER` when rate limited, 1s claim watchdog) approved. Access tokens never appear in logs (redacting encoder, tests); Phase 3 replaces the URL token with a single-use 30s ticket from REST. |
