@@ -233,12 +233,13 @@ Exact rules (the view is a pure function of the state):
 
 - Keys use base62 in ASCII order: `0–9`, `A–Z`, `a–z`. Plain byte comparison sorts them in
   Java and TypeScript alike.
-- `keyBetween(a, b)` is a credited port of Greenspan's fractional-indexing algorithm
-  (MIT; see ADR-001). `null` means the open start or end. A key is an *integer part*
+- `keyBetween(a, b)` is a credited port of Greenspan's fractional-indexing algorithm as
+  implemented in `rocicorp/fractional-indexing` (CC0-1.0, public domain; see ADR-001). `null` means the open start or end. A key is an *integer part*
   whose length is fixed by its head character (`a`–`z`: 2–27 characters; `A`–`Z`: 27–2)
   followed by a *fractional part*. **The fractional part never ends in `0`**, so there is
   always room before a key. The first key is `a0` (integer part only).
-- `keyBetween(a, b)` throws unless `a < b`. It is deterministic: no randomness.
+- `keyBetween(a, b)` throws unless `a < b` (upstream silently swaps reversed bounds; we
+  do not). It is deterministic: no randomness.
 - Render order is `(position_key, entity_id)`. Equal keys from concurrent inserts sort
   by ID, deterministically, with no suffix. Equal keys are common, not rare: the midpoint
   is deterministic, so two replicas appending to the same list at once pick the same key.
@@ -833,4 +834,5 @@ section text itself is updated in the same commit.
 | # | Date | Sections | Change |
 |---|---|---|---|
 | 1 | 2026-10-16 | §9.2.1–9.2.3, §11.1 | HLC JSON is three fields; canonical encoding is integer-only RFC 8785 with fixed escapes; canonical state shape defined; ADR-000b confirmed. |
+| 3 | 2026-10-16 | §3.7 | Upstream license is CC0-1.0, not MIT as first approved; attribution kept, notice corrected. Reversed bounds throw, unlike upstream. |
 | 2 | 2026-10-16 | §3.1, §3.4, §3.6, §3.7, §4.1, §4.2, §9.1, §9.2.4–9.2.5 | `checkClock` with a strict 60,000ms boundary; defensive LWW tie-break on unsigned canonical bytes, reported as a collision count; exact Orphaned rules with the nil-UUID reserved ID; Greenspan key format ("fractional part never ends in `0`"), `keyBetween` throws unless `a < b`, re-key rule for equal neighbours; op JSON encoding; `validateShape` rules (lowercase canonical UUIDs, no nil UUID, code-point lengths, NFC sorted labels ≤ 50 code points); view and vector formats. |
