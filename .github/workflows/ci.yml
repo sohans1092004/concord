@@ -1,0 +1,99 @@
+name: ci
+
+# Every push: both test suites (500 fuzz seeds each), the conformance vectors, and the
+# differential fuzz between the TypeScript and Java cores (SPEC §9).
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  vectors:
+    name: vectors are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python conformance/tools/build_vectors.py --check
+
+  crdt-ts:
+    name: crdt-ts (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: crdt-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: crdt-ts/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          FUZZ_RUNS: "500"
+      - run: npm run build
+      - name: publishable as a standalone package
+        run: npm pack --dry-run
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-fuzz-failures-node${{ matrix.node }}
+          path: crdt-ts/.fuzz-failures/
+          if-no-files-found: ignore
+
+  crdt-java:
+    name: crdt-java
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crdt-java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test jar
+        env:
+          FUZZ_RUNS: "500"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crdt-java-jar
+          path: crdt-java/build/libs/crdt-java-0.1.0.jar
+
+  differential:
+    name: differential fuzz (ts vs java)
+    needs: crdt-java
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: crdt-java-jar
+          path: crdt-java/build/libs
+      - run: npm ci
+        working-directory: crdt-ts
+      - run: npm ci
+        working-directory: conformance/runner
+      - run: npm test
+        working-directory: conformance/runner
+        env:
+          DIFF_RUNS: "500"

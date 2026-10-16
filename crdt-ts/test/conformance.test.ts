@@ -9,7 +9,10 @@ import { canonicalize, type Json } from "../src/canonical.js";
 import { Board } from "../src/board.js";
 import { checkClock, checkShape, type Op } from "../src/op.js";
 
-const dir = process.env.CONCORD_VECTORS ?? fileURLToPath(new URL("../../conformance/vectors/", import.meta.url));
+// In the repo the vectors live in conformance/vectors; a packed copy of this package
+// carries them in ./vectors (see the prepack script).
+const repoVectors = fileURLToPath(new URL("../../conformance/vectors/", import.meta.url));
+const dir = process.env.CONCORD_VECTORS ?? (existsSync(repoVectors) ? repoVectors : fileURLToPath(new URL("../vectors/", import.meta.url)));
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 interface Vector {

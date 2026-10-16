@@ -1,0 +1,82 @@
+name: nightly
+
+# 100,000 permutation-fuzz seeds per core, and a larger differential run (SPEC §9.1).
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ts-fuzz:
+    name: crdt-ts fuzz, 100,000 seeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    defaults:
+      run:
+        working-directory: crdt-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crdt-ts/package-lock.json
+      - run: npm ci
+      - run: npx vitest run test/fuzz.test.ts
+        env:
+          FUZZ_RUNS: "100000"
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-fuzz-failures
+          path: crdt-ts/.fuzz-failures/
+          if-no-files-found: ignore
+
+  java-fuzz:
+    name: crdt-java fuzz, 100,000 seeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    defaults:
+      run:
+        working-directory: crdt-java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: seeds start at a different place each night
+        run: echo "FUZZ_SEED=$(( $(date +%s) / 86400 * 100000 ))" >> "$GITHUB_ENV"
+      - run: ./gradlew test --tests '*FuzzTest*'
+        env:
+          FUZZ_RUNS: "100000"
+
+  differential:
+    name: differential fuzz, 5,000 scenarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: ./gradlew jar
+        working-directory: crdt-java
+      - run: npm ci
+        working-directory: crdt-ts
+      - run: npm ci
+        working-directory: conformance/runner
+      - name: differential with a nightly seed
+        run: DIFF_SEED=$(( $(date +%s) / 86400 )) npm test
+        working-directory: conformance/runner
+        env:
+          DIFF_RUNS: "5000"

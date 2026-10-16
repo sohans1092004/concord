@@ -16,6 +16,7 @@
     "dist",
     "src",
     "test",
+    "vectors",
     "tsconfig.json",
     "vitest.config.ts"
   ],
@@ -27,6 +28,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "prepack": "node -e \"require('fs').cpSync('../conformance/vectors','vectors',{recursive:true})\"",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
