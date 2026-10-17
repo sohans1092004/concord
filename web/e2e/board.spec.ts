@@ -164,9 +164,23 @@ test("cards and lists move with the mouse: reorder, across lists, never into Orp
   });
   const titles = (list: string) => p.getByTestId("list").filter({ hasText: list }).locator(".card-title").allTextContents();
   await expect.poll(() => titles("Left")).toEqual(["a1", "a2", "a3"]);
+  // A card's box while the previous drop is still animating is not where it will be a moment
+  // later: pressing there can grab the list header instead (CI on 483fcda; 7 of 25 runs locally).
+  // So wait until both boxes stop moving.
+  const settledBox = async (title: string) => {
+    const card = p.getByTestId("card").filter({ hasText: title });
+    let prev = await card.boundingBox();
+    for (let i = 0; i < 40; i++) {
+      await p.waitForTimeout(50);
+      const box = await card.boundingBox();
+      if (box && prev && box.x === prev.x && box.y === prev.y && box.width === prev.width && box.height === prev.height) return box;
+      prev = box;
+    }
+    throw new Error(`card ${title} kept moving`);
+  };
   const drag = async (from: string, to: string, below = false) => {
-    const f = await p.getByTestId("card").filter({ hasText: from }).boundingBox();
-    const t = await p.getByTestId("card").filter({ hasText: to }).boundingBox();
+    const f = await settledBox(from);
+    const t = await settledBox(to);
     await p.mouse.move(f!.x + f!.width / 2, f!.y + f!.height / 2);
     await p.mouse.down();
     await p.mouse.move(f!.x + f!.width / 2 + 10, f!.y + f!.height / 2 + 10, { steps: 5 });
