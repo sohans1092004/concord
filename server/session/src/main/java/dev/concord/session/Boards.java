@@ -74,8 +74,8 @@ public final class Boards implements AutoCloseable {
     }
 
     /**
-     * Compare-and-extend every lease (SPEC §6.2 step 5). Lost to another owner: drop the board.
-     * Redis unreachable: keep serving, because Postgres still fences us (§6.3).
+     * Compare-and-extend every lease (SPEC §6.2 step 6). Lost to another owner: drop the board.
+     * Redis or Postgres unreachable: keep serving, because Postgres still fences us (§6.3).
      */
     private void renewAll() {
         for (BoardActor a : List.copyOf(actors.values())) {
@@ -83,9 +83,9 @@ public final class Boards implements AutoCloseable {
             if (fence < 0) continue;
             try {
                 long r = deps.ownership().renew(a.id(), fence);
-                if (r == 0) a.offer(new BoardActor.Drop("lease held by another owner"));
+                if (r == 0) a.offer(new BoardActor.Drop("lease held by another owner, or a newer fence in Postgres"));
                 else if (r == 2) log.atInfo().addKeyValue("board_id", a.id()).log("lease was gone (expired or Redis wiped); re-taken");
-            } catch (RuntimeException e) {
+            } catch (java.sql.SQLException | RuntimeException e) {
                 deps.metrics().inc("lease_renew_failures");
             }
         }

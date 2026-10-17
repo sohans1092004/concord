@@ -43,6 +43,10 @@ CHECKS = {
         "the LRU lookup (SPEC §4.3 step 1)",
         [(ACTOR, "            Long acked = lru.get(opId);", "            Long acked = null;")],
         "dev.concord.session.WritePathTest.lruAnswersResendsWithoutTheDatabase", True),
+    "retake-fence-check": (
+        "the boards.fence check before re-taking a missing lease (amendment 13)",
+        [(OWNERSHIP, "if (current == null || current != fence) return 0;", "if (current == null) return 0;")],
+        "dev.concord.session.FencingTest.staleOwnerDoesNotRetakeAWipedLease", True),
     # Drill checks: the Session image is rebuilt with the guard removed and the drill run
     # against the compose stack (deploy/docker-compose.yml must be up), then restored.
     "fence-counter-rebuild": (

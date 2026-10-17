@@ -126,4 +126,38 @@ class FencingTest {
             assertEquals(after, owner.get("fence"));
         }
     }
+
+    /**
+     * Amendment 13: after a Redis wipe, a stale owner's renewal must not re-take the lease. If it
+     * did, the real owner's next renewal would find a foreign lease and drop the board.
+     */
+    @Test
+    void staleOwnerDoesNotRetakeAWipedLease() throws Exception {
+        try (Harness h = new Harness(); var redis = Infra.redis()) {
+            SessionMain a = h.session;
+            assertEquals("OP_ACK", h.submit(h.ops.addList(Ops.uuid(), "a0", "L")).get("type"));
+            long fenceA = a.boards.actor(h.board).fence();
+            Ownership staleA = new Ownership(a.redis.conn.sync(), a.store, a.config.instanceId(), a.config.advertise(), a.metrics);
+            var r = redis.conn.sync();
+            r.del(RedisKeys.lease(h.board), RedisKeys.owner(h.board));
+            try (SessionMain b = Harness.start("s-b-" + Ops.uuid(), Store::new, false)) {
+                b.boards.dispatch(h.board, new BoardActor.Ensure(h.probe.reply()));
+                assertEquals("OK", h.probe.next().get("type"));
+                long fenceB = b.boards.actor(h.board).fence();
+                waitClosed(a, h.board); // A's own renewer saw B's lease
+
+                // Wipe just after B renews, so B's next renewal is ~5s away, then let A renew first.
+                long ttl = r.pttl(RedisKeys.lease(h.board));
+                for (long t; (t = r.pttl(RedisKeys.lease(h.board))) <= ttl; ttl = t) Thread.sleep(5);
+                r.del(RedisKeys.lease(h.board), RedisKeys.owner(h.board));
+                assertEquals(0, staleA.renew(h.board, fenceA), "a stale owner must not re-take the lease");
+                assertNull(r.get(RedisKeys.lease(h.board)));
+
+                // B's renewal re-takes it, and B keeps the board.
+                for (int i = 0; i < 140 && r.get(RedisKeys.lease(h.board)) == null; i++) Thread.sleep(50);
+                assertEquals(b.config.instanceId() + ":" + fenceB, r.get(RedisKeys.lease(h.board)));
+                assertTrue(b.boards.actor(h.board) != null, "the real owner keeps the board");
+            }
+        }
+    }
 }

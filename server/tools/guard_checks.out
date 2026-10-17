@@ -22,3 +22,8 @@ command: cd server && python tools/guard_checks.py fence-check-e2e   (2026-10-16
 fence-check-e2e: removed the fence condition in the commit UPDATE, end to end with the stale owner cut off from Redis
   test drill:pause-owner-no-redis: FAILED without the guard (AssertionError: the stale owner sent no ACK for the probe: expected 'OP_ACK' to be 'ERROR' // Object.is equality); PASSED with it restored
 exit 0
+
+# 2026-10-17T01:27Z  python tools/guard_checks.py retake-fence-check
+retake-fence-check: removed the boards.fence check before re-taking a missing lease (amendment 13)
+  test staleOwnerDoesNotRetakeAWipedLease: FAILED without the guard (org.opentest4j.AssertionFailedError: a stale owner must not re-take the lease ==> expected: <0> but was: <2>); PASSED with it restored
+

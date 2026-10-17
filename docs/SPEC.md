@@ -536,8 +536,11 @@ and in the next snapshot.
 5. Replay ops with a higher version, in version order.
 6. Write `board:owner:{id}`, start renewing the lease every 5s with a compare-and-extend
    Lua script, and start serving. If renewal finds the lease gone (expired, or Redis
-   wiped), it re-takes it with the same value; Postgres still fences this owner, so this
-   is safe. If another instance holds it, the owner drops the board.
+   wiped), it reads `boards.fence`: only if that still equals its own fence does it re-take
+   the lease with the same value (`SET NX`, then the owner key); otherwise it drops the
+   board. Without this check a stale owner could re-take the lease after a wipe, and the
+   real owner's next renewal would find a foreign lease and drop the board. If another
+   instance holds the lease, the owner drops the board.
 
 Why step 3 exists: without it the new owner's fence reaches Postgres only with its first
 commit. An old owner paused past its lease could still commit with `fence <= :fence`
@@ -943,3 +946,4 @@ section text itself is updated in the same commit.
 | 10 | 2026-10-17 | §9.4 | The Phase 2 client choices (head-of-queue `INVALID_OP`, in-order queue resend, 10s JOIN timeout, fresh replica after a clock correction) and gateway choices (one board per connection, `access_token` query parameter, Origin optional but token required, `RETRY_LATER` when rate limited, 1s claim watchdog) approved. Access tokens never appear in logs (redacting encoder, tests); Phase 3 replaces the URL token with a single-use 30s ticket from REST. |
 | 11 | 2026-10-17 | §6.2, §8 | Drill for row 3 with the stale owner cut off from Redis, so its lease renewal cannot save it and the Postgres fence must reject its commit (it must log the rejection and commit nothing). A claim whose drawn fence is not above `boards.fence` is counted (`claim_fence_retries`); the wipe-redis drill requires the rebuilt counter to give `boards.fence + 1` with no retry. |
 | 12 | 2026-10-17 | §6.3 | A stale owner that never writes is never fenced and may answer `JOIN`/`SYNC_REQUEST` from stale memory (a prefix of the committed history); the window is bounded by the gateway's 5s owner cache, and by the stale owner's next renewal when it can reach Redis. |
+| 13 | 2026-10-17 | §6.2 | A renewal that finds the lease gone re-takes it only if `boards.fence` still equals its fence; otherwise it drops the board (`FencingTest.staleOwnerDoesNotRetakeAWipedLease`, guard check `retake-fence-check`). |

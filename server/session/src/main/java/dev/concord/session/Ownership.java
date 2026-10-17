@@ -24,10 +24,7 @@ public final class Ownership {
             return v
             """;
 
-    /**
-     * Compare-and-extend (step 6). 1: extended. 2: the lease was gone (expired or Redis wiped)
-     * and has been re-taken; Postgres still fences us, so this is safe. 0: someone else holds it.
-     */
+    /** Compare-and-extend (step 6). 1: extended. 2: the lease is gone. 0: someone else holds it. */
     static final String RENEW = """
             local v = redis.call('GET', KEYS[1])
             if v == ARGV[1] then
@@ -35,10 +32,15 @@ public final class Ownership {
               redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[2])
               return 1
             end
-            if not v then
-              redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+            if not v then return 2 end
+            return 0
+            """;
+
+    /** Re-take a missing lease (amendment 13): SET NX the lease, and the owner key if that worked. */
+    static final String RETAKE = """
+            if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then
               redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[2])
-              return 2
+              return 1
             end
             return 0
             """;
@@ -114,10 +116,21 @@ public final class Ownership {
         redis.set(RedisKeys.owner(board), ownerValue(fence), SetArgs.Builder.px(RedisKeys.LEASE_MS));
     }
 
-    /** 1 extended, 2 re-taken after loss, 0 lost to another owner. Throws if Redis is unreachable. */
-    public long renew(String board, long fence) {
-        return redis.eval(RENEW, ScriptOutputType.INTEGER, new String[] {RedisKeys.lease(board), RedisKeys.owner(board)},
-                leaseValue(fence), Long.toString(RedisKeys.LEASE_MS), ownerValue(fence));
+    /**
+     * 1 extended, 2 re-taken after loss, 0 lost (another owner holds the lease, or Postgres holds
+     * a newer fence). Throws if Redis or Postgres is unreachable. A missing lease (expired, or
+     * Redis wiped) is re-taken only while boards.fence still equals ours: a stale owner that
+     * re-took it would make the real owner's next renewal drop the board (amendment 13).
+     */
+    public long renew(String board, long fence) throws SQLException {
+        String[] keys = {RedisKeys.lease(board), RedisKeys.owner(board)};
+        String ttl = Long.toString(RedisKeys.LEASE_MS);
+        long r = redis.eval(RENEW, ScriptOutputType.INTEGER, keys, leaseValue(fence), ttl, ownerValue(fence));
+        if (r != 2) return r;
+        Long current = store.fence(board);
+        if (current == null || current != fence) return 0;
+        long taken = redis.eval(RETAKE, ScriptOutputType.INTEGER, keys, leaseValue(fence), ttl, ownerValue(fence));
+        return taken == 1 ? 2 : 0;
     }
 
     public boolean release(String board, long fence) {
