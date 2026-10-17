@@ -126,8 +126,15 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - run: uname -m && ./gradlew test
+      - name: server tests
         working-directory: server
+        run: |
+          # Thread dumps of any Gradle test JVM still running after 8 minutes (the suite takes ~3):
+          # the arm64 job hung twice in :gateway:test (92844f3, 790a65b) without saying where.
+          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; done ) &
+          dog=$!
+          uname -m && ./gradlew test; status=$?
+          kill $dog 2>/dev/null; exit $status
       - name: the production images (runtime, with the web app; backup)
         run: |
           docker build -f server/Dockerfile --target runtime -t concord:prod .
@@ -161,7 +168,14 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew test
+      - name: server tests
+        run: |
+          # Thread dumps of any Gradle test JVM still running after 8 minutes (the suite takes ~3):
+          # the arm64 job hung twice in :gateway:test (92844f3, 790a65b) without saying where.
+          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; done ) &
+          dog=$!
+          ./gradlew test; status=$?
+          kill $dog 2>/dev/null; exit $status
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

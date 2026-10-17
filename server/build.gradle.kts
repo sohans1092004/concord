@@ -38,8 +38,11 @@ subprojects {
         maxHeapSize = "1g"
         // A hung test fails with its name and stack trace instead of silently using up the CI job.
         systemProperty("junit.jupiter.execution.timeout.default", "5m")
+        // A hang outside any test (a JVM that does not exit) fails the task, so CI uploads reports.
+        timeout.set(java.time.Duration.ofMinutes(15))
         testLogging {
-            events("failed")
+            // In CI every test's start and end is logged, so a hang shows where it stopped.
+            if (System.getenv("CI") != null) events("started", "passed", "skipped", "failed") else events("failed")
             showStandardStreams = System.getenv("TEST_STDOUT") != null
             exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         }
