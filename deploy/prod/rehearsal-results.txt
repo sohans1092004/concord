@@ -57,3 +57,7 @@ total of the production services (without the rehearsal-only minio and tunnel): 
 sum of the limits (worst case): 512+640+640+384+384+96+96 = 2752 MiB (+256 MiB for migrate while it runs)
 headroom: measured, on this laptop's 7.57 GiB Docker VM: about 92% free for these; worst case on the planned 12 GB Oracle VM: 2.75 GB used, 77% free (the 25% criterion holds even at every limit); on a 6 GB VM: 54% free
 JVMs use the Serial collector (the JVM's choice for containers under 1792 MB); heaps capped at 256m (gateway) and 384m (sessions)
+
+## Local suites after amendment 26 (2026-10-17T12:55:20Z, commit 7207093)
+client-core e2e (npx vitest run test/e2e): 6 passed; drills (deploy/drills/run-all.sh): all passed
+Playwright (npx playwright test): 18 passed, 2 skipped (offline hour, deployed URL), 1 failed: perf.spec strict local target (max < 16ms); rerun: n=599 p50 5.20 p95 9.40 p99 12.80 max 16.40 ms, 1 of 599 >= 16ms, 0 long tasks. Machine busy (both compose stacks, VS Code); the strict check is pending the reboot run.
