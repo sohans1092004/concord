@@ -7,7 +7,6 @@
       <withArguments>false</withArguments>
       <withSequenceNumber>false</withSequenceNumber>
       <withNanoseconds>false</withNanoseconds>
-      <withContextName>false</withContextName>
     </encoder>
   </appender>
   <logger name="org.eclipse.jetty" level="WARN"/>

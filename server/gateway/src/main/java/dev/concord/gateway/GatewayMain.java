@@ -40,7 +40,7 @@ public final class GatewayMain implements AutoCloseable {
     final java.util.concurrent.atomic.AtomicLong outboxPeak = new java.util.concurrent.atomic.AtomicLong();
 
     public GatewayMain(Config config) {
-        config.check();
+        config.checkPublic();
         redis = new Redis(config.redisUrl());
         db = Db.pool(config);
         router = new Router(redis.conn.sync(), System::currentTimeMillis, config.internalSecret());
@@ -64,6 +64,32 @@ public final class GatewayMain implements AutoCloseable {
         Api api = new Api(app, db, redis.conn.sync(), config, System::currentTimeMillis);
         cleaner.scheduleWithFixedDelay(api::cleanup, 60, 60, java.util.concurrent.TimeUnit.SECONDS);
         app.get("/health", ctx -> ctx.result("ok"));
+        // For the uptime monitor and compose: up, Postgres answering (Redis down is survivable, §8),
+        // and the disk not nearly full. The container's root sits on the host's Docker disk, so
+        // its free space is the host's: under 10% free, the public /healthz fails and the uptime
+        // monitor emails (docs/runbook.md, "Monitoring").
+        app.get("/healthz", ctx -> {
+            java.io.File root = new java.io.File("/");
+            long free = root.getUsableSpace(), total = root.getTotalSpace();
+            if (total > 0 && free * 10 < total) {
+                ctx.status(503).result("disk nearly full: " + (free >> 20) + " MB free of " + (total >> 20) + " MB");
+                return;
+            }
+            try (var c = db.getConnection(); var s = c.createStatement()) {
+                s.execute("SELECT 1");
+                ctx.result("ok");
+            } catch (java.sql.SQLException e) {
+                ctx.status(503).result("postgres unavailable");
+            }
+        });
+        // The Content-Security-Policy the web app passes (Phase 4a); Caddy adds HSTS and the rest.
+        if (!config.publicOrigin().isEmpty()) {
+            String host = config.publicOrigin().substring("https://".length());
+            String csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
+                    + "connect-src 'self' wss://" + host + "; worker-src 'self'; manifest-src 'self'; object-src 'none'; "
+                    + "base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+            app.after(ctx -> ctx.header("Content-Security-Policy", csp));
+        }
         app.get("/metrics", ctx -> ctx.contentType("application/json")
                 .result(Msg.encode(Msg.obj("connections", (long) conns.size(), "clients_on_boards", (long) fanout.clientCount(),
                         "slow_consumer_closes", slowConsumerCloses.get(), "outbox_peak_bytes", outboxPeak.get(),

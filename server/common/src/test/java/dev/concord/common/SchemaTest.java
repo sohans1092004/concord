@@ -32,12 +32,36 @@ class SchemaTest {
     void devSecretAndShortSecretsAreRefusedOutsideDev() {
         assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod")).check());
         assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "staging")).check());
-        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(31))).check());
+        String db = "a-strong-database-password";
+        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(31), "CONCORD_DB_PASSWORD", db)).check());
         assertThrows(IllegalStateException.class,
-                () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", Config.DEV_INTERNAL_SECRET)).check());
-        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(32))).check();
+                () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", Config.DEV_INTERNAL_SECRET, "CONCORD_DB_PASSWORD", db)).check());
+        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(32))).check(),
+                "the dev database password is refused");
+        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(32), "CONCORD_DB_PASSWORD", db)).check();
         assertEquals(Config.DEV_INTERNAL_SECRET, Config.from(Map.of("CONCORD_ENV", "dev")).check().internalSecret());
         assertEquals("", Config.from(Map.of("CONCORD_ENV", "dev")).inviteCode(), "sign-up is open unless a code is set");
+    }
+
+    /** Phase 4a: a production gateway refuses every dev setting. */
+    @Test
+    void aProductionGatewayRefusesEveryDevSetting() {
+        java.util.Map<String, String> good = new java.util.HashMap<>(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(32),
+                "CONCORD_DB_PASSWORD", "a-strong-database-password", "CONCORD_PUBLIC_ORIGIN", "https://concord-x.duckdns.org",
+                "CONCORD_ALLOWED_ORIGINS", "https://concord-x.duckdns.org", "CONCORD_INVITE_CODE", "twelve-chars-x", "CONCORD_TRUSTED_PROXY", "caddy"));
+        Config.from(good).checkPublic();
+        for (String[] bad : new String[][] {
+                {"CONCORD_PUBLIC_ORIGIN", "http://concord-x.duckdns.org"},
+                {"CONCORD_PUBLIC_ORIGIN", "https://localhost"},
+                {"CONCORD_ALLOWED_ORIGINS", "https://concord-x.duckdns.org,http://localhost:5173"},
+                {"CONCORD_COOKIE_SECURE", "false"},
+                {"CONCORD_INVITE_CODE", ""},
+                {"CONCORD_SIGNIN_IP_BURST", "1000"},
+                {"CONCORD_TRUSTED_PROXY", ""}}) {
+            java.util.Map<String, String> env = new java.util.HashMap<>(good);
+            env.put(bad[0], bad[1]);
+            assertThrows(IllegalStateException.class, () -> Config.from(env).checkPublic(), bad[0] + "=" + bad[1] + " must be refused");
+        }
     }
 
     @Test

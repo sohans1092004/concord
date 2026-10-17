@@ -84,3 +84,12 @@ presence-per-connection: removed keying presence by connection on the client, so
   test pw:e2e/board.spec.ts:193: FAILED without the guard (Error: expect(locator).toHaveText(expected) failed); PASSED with it restored
 presence-sweep: removed removing presence entries older than 30s in the sweep (SPEC 5.2)
   test sweepRemovesStaleEntriesAndAnnouncesEachConnectionThatWent: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <[6c877856-a68a-470c-bc42-8c111838f1ff:conn-3:-:idle]> but was: <[48e792e6-19ce-41f2-863c-e9b5ac331ac7:conn-1:-:active, 6c877856-a68a-470c-bc42-8c111838f); PASSED with it restored
+
+command: cd server && python tools/guard_checks.py trusted-proxy-only backup-verify-replay delete-user-heir   (2026-10-17T08:54:46Z, commit 46199e7 + uncommitted Phase 4a)
+trusted-proxy-only: removed believing X-Forwarded-For only from the trusted proxy's address (amendment 23)
+  test forwardedForIsBelievedOnlyFromTheTrustedProxy: FAILED without the guard (org.opentest4j.AssertionFailedError: a forged X-Forwarded-For from a non-proxy must not dodge the per-IP limit ==> expected: <2> but was: <0>); PASSED with it restored
+backup-verify-replay: removed checking each board's full replay against the backup manifest (Phase 4a step 5)
+  test verifyPassesOnTheSameDataAndCatchesDamage: FAILED without the guard (org.opentest4j.AssertionFailedError: [] ==> expected: <true> but was: <false>); PASSED with it restored
+delete-user-heir: removed making a remaining member owner when a deleted user was a shared board's last owner
+  test deletingAnAccountRemovesItsDataAndKeepsSharedBoards: FAILED without the guard (org.opentest4j.AssertionFailedError: {error=storage unavailable, try again} ==> expected: <200> but was: <503>); PASSED with it restored
+  (delete-user-heir: without the promotion the deletion's transaction fails, so the account is not deleted at all; the test fails on the 503, not on a later ownership assertion)

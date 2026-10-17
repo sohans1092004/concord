@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
  *   POST   /api/auth/sign-out
  *   POST   /api/auth/password       {current, password}   revokes the user's other sessions
  *   GET    /api/me
+ *   DELETE /api/me                  {password}: deletes the account and its data (Accounts)
  *   POST   /api/ws-ticket           → {ticket}: single use, 30s, for the WebSocket URL
  *   GET    /api/boards              my boards and my role on each
  *   POST   /api/boards              {title} → {id}
@@ -89,6 +90,7 @@ final class Api {
             User u = auth(ctx);
             json(ctx, Msg.obj("id", u.id(), "email", u.email(), "name", u.name()));
         });
+        app.delete("/api/me", this::deleteMe);
         app.post("/api/ws-ticket", this::ticket);
         app.get("/api/boards", this::myBoards);
         app.post("/api/boards", this::createBoard);
@@ -133,6 +135,50 @@ final class Api {
         return (String) rows.get(0).get("role");
     }
 
+    /**
+     * The client's address for per-IP limits (amendment 23). Behind Caddy every request comes from
+     * Caddy's address, so the real client is the last X-Forwarded-For entry, which Caddy sets
+     * itself. That header is believed only when the request's socket address is the configured
+     * proxy: anyone else sending it is ignored, and their own socket address is used.
+     */
+    String clientIp(Context ctx) {
+        String socket = normalize(ctx.req().getRemoteAddr());
+        if (!trustedProxyAddresses().contains(socket)) return socket;
+        String xff = ctx.header("X-Forwarded-For");
+        if (xff == null || xff.isBlank()) return socket;
+        String[] parts = xff.split(",");
+        return parts[parts.length - 1].trim();
+    }
+
+    private volatile java.util.Set<String> trusted = java.util.Set.of();
+    private volatile long trustedAt; // 0: resolve on first use (MIN_VALUE would overflow now - trustedAt)
+
+    /** The proxy's addresses, resolved again every 30s: a restarted container may get a new one. */
+    private java.util.Set<String> trustedProxyAddresses() {
+        if (config.trustedProxy().isEmpty()) return java.util.Set.of();
+        long now = clock.getAsLong();
+        if (now - trustedAt > 30_000) {
+            try {
+                java.util.Set<String> s = new java.util.HashSet<>();
+                for (var a : java.net.InetAddress.getAllByName(config.trustedProxy())) s.add(a.getHostAddress());
+                trusted = s;
+            } catch (java.net.UnknownHostException e) {
+                log.warn("trusted proxy {} does not resolve; X-Forwarded-For ignored", config.trustedProxy());
+                trusted = java.util.Set.of();
+            }
+            trustedAt = now;
+        }
+        return trusted;
+    }
+
+    private static String normalize(String ip) {
+        try {
+            return java.net.InetAddress.getByName(ip).getHostAddress();
+        } catch (java.net.UnknownHostException e) {
+            return ip;
+        }
+    }
+
     private boolean allowed(String key, double perSecond, double burst) {
         if (limits.size() > 100_000) limits.clear(); // ponytail: crude bound; per-key expiry if it matters
         return limits.computeIfAbsent(key, k -> new TokenBucket(perSecond, burst, clock.getAsLong())).take(clock.getAsLong());
@@ -142,7 +188,7 @@ final class Api {
 
     private void signUp(Context ctx) throws SQLException {
         Map<?, ?> b = body(ctx);
-        if (!allowed("ip:" + ctx.ip(), 0.1, config.signInIpBurst())) throw new HttpResponseException(429, "too many attempts, try again in a minute");
+        if (!allowed("ip:" + clientIp(ctx), 0.1, config.signInIpBurst())) throw new HttpResponseException(429, "too many attempts, try again in a minute");
         if (!config.inviteCode().isEmpty() && !java.security.MessageDigest.isEqual(
                 config.inviteCode().getBytes(java.nio.charset.StandardCharsets.UTF_8), str(b, "invite_code", 0, 200).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
             throw new HttpResponseException(403, "a valid invite code is required");
@@ -166,7 +212,7 @@ final class Api {
     private void signIn(Context ctx) throws SQLException {
         Map<?, ?> b = body(ctx);
         String email = String.valueOf(b.get("email")).trim().toLowerCase(java.util.Locale.ROOT);
-        if (!allowed("email:" + email, 1 / 60.0, 5) || !allowed("ip:" + ctx.ip(), 0.1, config.signInIpBurst()))
+        if (!allowed("email:" + email, 1 / 60.0, 5) || !allowed("ip:" + clientIp(ctx), 0.1, config.signInIpBurst()))
             throw new HttpResponseException(429, "too many sign-in attempts, try again in a minute");
         var rows = query("SELECT id, name, password_hash FROM users WHERE email = ?", email);
         String hash = rows.isEmpty() ? dummyHash : (String) rows.get(0).get("password_hash");
@@ -219,6 +265,20 @@ final class Api {
         }
         log.atInfo().addKeyValue("user_id", u.id()).log("password changed; other sessions revoked");
         json(ctx, Msg.obj("changed", true));
+    }
+
+    /** Deletes the caller's account and data (Accounts), after the password is given again. */
+    private void deleteMe(Context ctx) throws SQLException {
+        User u = auth(ctx);
+        Map<?, ?> b = body(ctx);
+        String stored = (String) query("SELECT password_hash FROM users WHERE id = ?", UUID.fromString(u.id())).get(0).get("password_hash");
+        if (!allowed("email:" + u.email(), 1 / 60.0, 5)) throw new HttpResponseException(429, "too many attempts, try again in a minute");
+        if (!Passwords.verify(String.valueOf(b.get("password")), stored)) throw new HttpResponseException(403, "the password is wrong");
+        Accounts.Deleted d = Accounts.delete(db, u.id());
+        Accounts.announce(redis, d);
+        log.atInfo().addKeyValue("user_id", u.id()).log("account deleted");
+        ctx.header("Set-Cookie", cookie("", 0));
+        json(ctx, Accounts.json(d));
     }
 
     /** SPEC §9.4: a single-use ticket valid for 30s, for the WebSocket URL (amendment 14). */

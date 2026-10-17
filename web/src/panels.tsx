@@ -92,7 +92,7 @@ export function HistoryPanel({ client, boardId, onClose }: { client: SyncClient;
       <ol className="rows">
         {entries.map((e) => (
           <li key={e.version} data-testid="history-item">
-            <div><b>{e.user_name ?? "Concord (reordering)"}</b> {describeOp(e.op, titles)}</div>
+            <div><b>{e.user_name ?? (e.user_id === "00000000-0000-0000-0000-000000000000" ? "Concord (reordering)" : "A deleted account")}</b> {describeOp(e.op, titles)}</div>
             <div className="muted small">{new Date(e.committed_at).toLocaleString()}</div>
           </li>
         ))}

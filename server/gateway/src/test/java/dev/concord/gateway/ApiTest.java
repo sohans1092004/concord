@@ -145,6 +145,42 @@ class ApiTest {
         assertEquals(200, new Rest(g.port()).post("/api/auth/sign-in", Msg.obj("email", email, "password", "a new password")).status());
     }
 
+    /** Amendment 23: X-Forwarded-For counts only from the trusted proxy's address. */
+    @Test
+    void forwardedForIsBelievedOnlyFromTheTrustedProxy() throws Exception {
+        // Not from the proxy: a forged header is ignored, so every attempt counts against our own address.
+        Map<String, String> env = Infra.gatewayEnv();
+        env.put("CONCORD_SIGNIN_IP_BURST", "3");
+        env.put("CONCORD_TRUSTED_PROXY", "192.0.2.1"); // TEST-NET-1: never this test's address
+        try (GatewayMain gw = new GatewayMain(Config.from(env))) {
+            int refused = 0;
+            for (int i = 0; i < 5; i++) {
+                Rest r = new Rest(gw.port());
+                r.headers.put("X-Forwarded-For", "203.0.113." + i); // a different "client" every time
+                if (r.post("/api/auth/sign-in", Msg.obj("email", Rest.email(), "password", "whatever1")).status() == 429) refused++;
+            }
+            assertEquals(2, refused, "a forged X-Forwarded-For from a non-proxy must not dodge the per-IP limit");
+        }
+        // From the proxy (here, this test's own address): each forwarded client has its own bucket.
+        env = Infra.gatewayEnv();
+        env.put("CONCORD_SIGNIN_IP_BURST", "3");
+        env.put("CONCORD_TRUSTED_PROXY", "localhost");
+        try (GatewayMain gw = new GatewayMain(Config.from(env))) {
+            for (int i = 0; i < 5; i++) {
+                Rest r = new Rest(gw.port());
+                r.headers.put("X-Forwarded-For", "198.51.100.7, 203.0.113." + i); // the proxy appends the real client last
+                assertEquals(401, r.post("/api/auth/sign-in", Msg.obj("email", Rest.email(), "password", "whatever1")).status());
+            }
+            int refused = 0;
+            for (int i = 0; i < 4; i++) {
+                Rest r = new Rest(gw.port());
+                r.headers.put("X-Forwarded-For", "203.0.113.99");
+                if (r.post("/api/auth/sign-in", Msg.obj("email", Rest.email(), "password", "whatever1")).status() == 429) refused++;
+            }
+            assertEquals(1, refused, "the same forwarded client is limited");
+        }
+    }
+
     @Test
     void anInviteCodeGatesSignUpWhenSet() throws Exception {
         Map<String, String> env = Infra.gatewayEnv();
@@ -228,6 +264,48 @@ class ApiTest {
                 UUID.fromString(board));
         var all = (List<Map<?, ?>>) u.get("/api/boards/" + board + "/history").body().get("entries");
         assertEquals(List.of(5L, 4L, 3L, 2L), all.stream().map(e -> e.get("version")).toList(), "older than 30 days is not shown");
+    }
+
+    /** Phase 4a step 8: deleting an account removes its data, keeps shared boards whole. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deletingAnAccountRemovesItsDataAndKeepsSharedBoards() throws Exception {
+        Rest a = new Rest(g.port()), b = new Rest(g.port());
+        String aId = (String) a.signUp(Rest.email(), "Leaving Lee").get("id");
+        String bEmail = Rest.email();
+        String bId = (String) b.signUp(bEmail, "Staying Sam").get("id");
+        String solo = (String) a.post("/api/boards", Msg.obj("title", "Only mine")).body().get("id");
+        String shared = (String) a.post("/api/boards", Msg.obj("title", "Ours")).body().get("id");
+        assertEquals(201, a.post("/api/boards/" + shared + "/members", Msg.obj("email", bEmail, "role", "editor")).status());
+        Ops ops = new Ops(shared);
+        try (WsClient c = new WsClient(g.port(), a.ticket(), null)) {
+            c.join(shared, null);
+            assertEquals("OP_ACK", c.op(ops.addList(Ops.uuid(), "a0", "Lee's list")).get("type"));
+        }
+        assertEquals(201, a.post("/api/bug-reports", Msg.obj("board_id", shared, "description", "x", "diagnostics", Msg.obj())).status());
+        String aSession = a.cookie;
+
+        assertEquals(403, a.send("DELETE", "/api/me", Msg.obj("password", "not it")).status());
+        Rest.Reply r = a.send("DELETE", "/api/me", Msg.obj("password", "correct horse battery"));
+        assertEquals(200, r.status(), () -> String.valueOf(r.body()));
+        assertEquals(List.of(solo), r.body().get("boards_deleted"));
+        assertEquals(List.of(shared), r.body().get("boards_left"));
+
+        var db = Infra.db();
+        java.util.function.BiFunction<String, String, Long> rows = (sql, id) -> dev.concord.session.Seed.count(db, sql, UUID.fromString(id));
+        assertEquals(0L, rows.apply("SELECT count(*) FROM boards WHERE id = ?", solo));
+        assertEquals(1L, rows.apply("SELECT count(*) FROM boards WHERE id = ?", shared));
+        assertEquals(1L, rows.apply("SELECT count(*) FROM board_ops WHERE board_id = ?", shared), "the shared board keeps its history");
+        assertEquals(0L, rows.apply("SELECT count(*) FROM users WHERE id = ?", aId));
+        assertEquals(0L, rows.apply("SELECT count(*) FROM sessions WHERE user_id = ?", aId));
+        assertEquals(0L, rows.apply("SELECT count(*) FROM bug_reports WHERE user_id = ?", aId));
+        Rest stale = new Rest(g.port());
+        stale.bearer = aSession;
+        assertEquals(401, stale.get("/api/me").status(), "the deleted user's session is gone");
+        var members = (List<Map<?, ?>>) b.get("/api/boards/" + shared + "/members").body().get("members");
+        assertEquals(List.of(Map.of("user_id", bId, "name", "Staying Sam", "email", bEmail, "role", "owner")), members, "Sam is now the owner");
+        var history = (List<Map<?, ?>>) b.get("/api/boards/" + shared + "/history").body().get("entries");
+        assertEquals(java.util.Arrays.asList((Object) null), history.stream().map(e -> e.get("user_name")).toList(), "the edit stays, without a name");
     }
 
     @Test

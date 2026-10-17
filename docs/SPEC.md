@@ -121,6 +121,7 @@ the API.
 | `GET/POST /api/boards/{id}/members`, `PATCH/DELETE …/members/{user}` | List; add an existing user by email with a role; change a role; remove (an owner, or a member leaving) |
 | `GET /api/boards/{id}/history?before_version=&limit=` | `board_ops` of the last 30 days, newest first, 50 per page (200 at most), with the sender's name; the owner's rebalancing ops have no user |
 | `POST /api/bug-reports` | The trial's in-app report: description and the diagnostics the tester left ticked, redacted (§9.4) |
+| `DELETE /api/me` | With the password: deletes the account, the boards only that user belongs to and their bug reports; on shared boards they leave (the last owner's role passes to the longest-standing member) and their past ops stay, unnamed (amendment 25) |
 
 ### 2.2 Board actor and threads
 
@@ -910,7 +911,11 @@ independent of both cores.
   of which `sessions` stores only the SHA-256. Scripts (tests, drills) send the same token as
   `Authorization: Bearer`. Changing the password deletes every other session of that user.
   Sign-in is limited per email (5 attempts, then 1 a minute) and per IP (30, then 1 every
-  10s) in each gateway's memory, and an unknown email is checked against a dummy hash so
+  10s) in each gateway's memory. The IP is the request's socket address, except that a request
+  whose socket address is the configured proxy (`CONCORD_TRUSTED_PROXY`, Caddy) is taken to be
+  from the last `X-Forwarded-For` entry, which Caddy sets to the connecting client; the header
+  from anyone else is ignored (amendment 23). The gateway adds the Content-Security-Policy; the
+  proxy adds HSTS and the other security headers, and an unknown email is checked against a dummy hash so
   timing does not reveal it. Sign-up can require an invite code (`CONCORD_INVITE_CODE`; off
   when empty).
 - Every state-changing REST call must be JSON and its `Origin`, when present, must be on the
@@ -947,6 +952,32 @@ independent of both cores.
 | Logs | JSON lines with `board_id`, `op_id`, `user_id` where known: connections, rejections, claims, fence rejections, snapshot failures |
 | Traces | OpenTelemetry: client send → gateway → owner → commit → broadcast → peer render |
 | Alerts | Sync p95 > 200ms for 5 min; commit failures; any fence rejection; claim churn above normal; version-gap rate above normal; reconnect storm |
+
+### 9.6 Trial deployment (Phase 4a)
+
+One VM (`deploy/prod/compose.yaml`; operations in `docs/runbook.md`):
+
+- **Services:** Caddy (the only published ports, 80 and 443, with a Let's Encrypt
+  certificate), one gateway that also serves the web app, two Session instances so a board's
+  owner can fail over, Postgres with a named volume, Redis without persistence, and a backup job.
+- **Memory:** every JVM has an explicit heap and every container a memory limit.
+- **Production refuses every dev value:**
+  - the dev internal secret, or a short or dev database password;
+  - a public origin that is not `https`;
+  - an Origin allowlist other than exactly that origin;
+  - a session cookie without `Secure`;
+  - no invite code, or a per-IP sign-in limit above 30;
+  - no trusted proxy.
+- **`/healthz`** on every service. The gateway's also fails when Postgres does not answer or
+  less than 10% of the disk is free, so an external uptime monitor on the public URL reports both.
+- **Backups:** nightly. `pg_dump` and a manifest are taken from one exported Postgres snapshot,
+  encrypted with `age` to a key that is not on the VM, and stored off-machine with `rclone`,
+  14 days kept.
+  - The manifest holds every table's row count and every board's version and state hash (a
+    full replay of its ops).
+  - A restore counts only once verified: row counts equal, and every board's state, loaded both
+    as a new owner loads it (snapshot plus later ops) and by full replay, hashes to the
+    manifest's value (`dev.concord.session.Backup`, `deploy/prod/restore.sh`).
 
 ## 10. Phases
 
@@ -1058,4 +1089,6 @@ section text itself is updated in the same commit.
 | 20 | 2026-10-17 | §10.1 | The development laptop is the measuring machine; targets are judged there. CI runs the same tests as regression guards with looser bounds and records the numbers: the 2,000-card render test requires every update under 16ms locally and p95 under 25ms in CI. |
 | 21 | 2026-10-17 | §7.1, §7.2 | §7.2's order is enforced: each edit's op is appended to an append-only IndexedDB log and committed before it is shown or sent; snapshots are coalesced (about 1s, and on `pagehide`) and replace the log entries they include; load merges snapshot and log and moves the HLC past logged ops. Edit-to-screen p50 4.1–4.3ms after, 4.9–5.0ms before (`web/e2e/latency.spec.ts`). |
 | 22 | 2026-10-17 | §5.2, §7.5 | Presence per connection: member `user:connection:card:state`, `PRESENCE_UPDATE` carries `connection_id`, `left` removes one connection; a user is shown while any of their connections is present (`board.spec.ts` two-tab test, guard check `presence-per-connection`). |
-| 23 | 2026-10-17 | §9.4 (Phase 4) | Approved for Phase 4: the gateway trusts `X-Forwarded-For` only from configured proxy addresses, for the per-IP sign-in limit. Until then it uses the socket address. |
+| 23 | 2026-10-17 | §9.4 | Revised in Phase 4a: the client IP for per-IP limits is the last `X-Forwarded-For` entry only when the request's socket address is the trusted proxy (`CONCORD_TRUSTED_PROXY`, Caddy, re-resolved every 30s); any other source uses its socket address (`ApiTest.forwardedForIsBelievedOnlyFromTheTrustedProxy`, guard check `trusted-proxy-only`). |
+| 24 | 2026-10-17 | §9.6 (new), §9.4 | Trial deployment: Caddy with Let's Encrypt as the only open ports; 1 gateway, 2 Session instances, Postgres, Redis, backups; explicit heaps and memory limits; production refuses every dev value (`Config.checkPublic`); the gateway sets the CSP and `/healthz` checks Postgres and free disk. The server image uses the JDK (jcmd for memory checks). |
+| 25 | 2026-10-17 | §2.1, §9.6 | Verified backups (`Backup dump`/`verify`, one exported snapshot for dump and manifest; guard check `backup-verify-replay`). Account deletion, `DELETE /api/me` and `Accounts delete <email>` (guard check `delete-user-heir`). |

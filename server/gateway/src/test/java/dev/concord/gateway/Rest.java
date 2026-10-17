@@ -17,6 +17,7 @@ class Rest {
     String cookie; // the concord_session value, from Set-Cookie
     String bearer;
     String origin = "http://allowed.test";
+    final Map<String, String> headers = new java.util.HashMap<>();
 
     Rest(int port) {
         this.port = port;
@@ -36,6 +37,7 @@ class Rest {
         if (origin != null) b.header("Origin", origin);
         if (cookie != null) b.header("Cookie", Api.COOKIE + "=" + cookie);
         if (bearer != null) b.header("Authorization", "Bearer " + bearer);
+        headers.forEach(b::header);
         b.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(Msg.encode(body)));
         HttpResponse<String> r = HTTP.send(b.build(), HttpResponse.BodyHandlers.ofString());
         r.headers().firstValue("Set-Cookie").ifPresent(c -> {

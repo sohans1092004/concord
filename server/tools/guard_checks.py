@@ -17,6 +17,8 @@ ACTOR = "session/src/main/java/dev/concord/session/BoardActor.java"
 STORE = "session/src/main/java/dev/concord/session/Store.java"
 OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
 API = "gateway/src/main/java/dev/concord/gateway/Api.java"
+ACCOUNTS = "gateway/src/main/java/dev/concord/gateway/Accounts.java"
+BACKUP = "session/src/main/java/dev/concord/session/Backup.java"
 ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
 PRESENCE = "gateway/src/main/java/dev/concord/gateway/Presence.java"
 CLIENTCONN = "gateway/src/main/java/dev/concord/gateway/ClientConn.java"
@@ -94,6 +96,18 @@ CHECKS = {
         "redacting ticket= and session values in log lines (only access_token= left)",
         [(ENCODER, "\"((?:ticket|access_token|concord_session)=|Bearer )", "\"((?:access_token)=)")],
         "dev.concord.gateway.GatewayLogTest.tokensNeverReachTheLogs", True),
+    "trusted-proxy-only": (
+        "believing X-Forwarded-For only from the trusted proxy's address (amendment 23)",
+        [(API, "        if (!trustedProxyAddresses().contains(socket)) return socket;\n", "")],
+        "dev.concord.gateway.ApiTest.forwardedForIsBelievedOnlyFromTheTrustedProxy", True),
+    "backup-verify-replay": (
+        "checking each board's full replay against the backup manifest (Phase 4a step 5)",
+        [(BACKUP, "                if (!expected.equals(viaReplay)) problems.add(board + \": full replay \" + viaReplay + \", manifest \" + expected);\n", "")],
+        "dev.concord.session.BackupTest.verifyPassesOnTheSameDataAndCatchesDamage", True),
+    "delete-user-heir": (
+        "making a remaining member owner when a deleted user was a shared board's last owner",
+        [(ACCOUNTS, "                        exec(c, \"UPDATE board_members SET role = 'owner' WHERE board_id = ? AND user_id = ?\", b, UUID.fromString(heir));\n", "")],
+        "dev.concord.gateway.ApiTest.deletingAnAccountRemovesItsDataAndKeepsSharedBoards", True),
     "presence-sweep": (
         "removing presence entries older than 30s in the sweep (SPEC 5.2)",
         [(PRESENCE, "                redis.zremrangebyscore(key(board), old);\n", "")],
