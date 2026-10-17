@@ -11,6 +11,10 @@ import { randomEdits } from "./workload";
 
 const MINUTES = Number(process.env.OFFLINE_MINUTES ?? 60);
 
+// No trace: an hour-long trace is large, and other Playwright runs in this directory clear
+// test-results/ under it (the first recorded run failed in teardown on exactly that).
+test.use({ trace: "off" });
+
 test("offline for an hour, in real time", async ({ browser }) => {
   test.skip(!process.env.OFFLINE_HOUR, "an hour long: run with OFFLINE_HOUR=1");
   test.setTimeout((MINUTES + 20) * 60_000);

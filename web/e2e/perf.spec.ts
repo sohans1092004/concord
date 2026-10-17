@@ -154,6 +154,9 @@ test("2,000 cards, 10 editors: each update renders in under 16ms", async ({ brow
   for (const e of editors) e.close();
   expect(cards).toBe(CARDS);
   expect(s.n).toBeGreaterThan(sent / 2); // updates were actually measured (React batches some)
-  expect(s.max, "every update must render in under 16ms").toBeLessThan(16);
+  // Amendment 20: the laptop is the measuring machine (§10.1) and keeps the strict target; CI's
+  // shared runner is a regression guard on p95 only. The numbers above are recorded either way.
+  if (process.env.CI) expect(s.p95, "CI regression guard: p95 under 25ms").toBeLessThan(25);
+  else expect(s.max, "every update must render in under 16ms").toBeLessThan(16);
   await ctx.close();
 });

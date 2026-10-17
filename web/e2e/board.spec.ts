@@ -189,3 +189,28 @@ test("cards and lists move with the mouse: reorder, across lists, never into Orp
   await settled(p);
   await a.close();
 });
+
+test("presence per connection: a user with two tabs stays present when one closes (amendment 22)", async ({ browser }) => {
+  const a = await browser.newContext(), b = await browser.newContext();
+  await signUp(a, "Ann Watcher");
+  const two = await signUp(b, "Tia Twotabs");
+  const board = await createBoard(a, "Two tabs");
+  await addMember(a, board, two.email);
+  const pa = await a.newPage();
+  await openBoard(pa, board);
+  const tab1 = await b.newPage(), tab2 = await b.newPage();
+  await openBoard(tab1, board);
+  await openBoard(tab2, board);
+  await expect(pa.locator(".who .avatar")).toHaveText(["TT"]);
+  await tab1.close();
+  // Its "left" arrives at once; Tia is still here on her other tab, before the other tab's
+  // next heartbeat could mask a wrong removal, and after it.
+  await pa.waitForTimeout(1_500);
+  await expect(pa.locator(".who .avatar")).toHaveText(["TT"], { timeout: 1 });
+  await pa.waitForTimeout(10_500);
+  await expect(pa.locator(".who .avatar")).toHaveText(["TT"]);
+  await tab2.close();
+  await expect(pa.locator(".who .avatar")).toHaveCount(0);
+  await a.close();
+  await b.close();
+});

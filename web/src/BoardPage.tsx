@@ -3,7 +3,8 @@
 // client-core's view and turns user intents into client-core calls.
 
 import {
-  closestCorners, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent,
+  closestCorners, DndContext, KeyboardSensor, PointerSensor, pointerWithin, useDroppable, useSensor, useSensors,
+  type CollisionDetection, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
   horizontalListSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
@@ -18,6 +19,24 @@ import { BugReportPanel, HistoryPanel, MembersPanel, TrashPanel, UnsentPanel } f
 import { updateCommitted, useBoard, useClientVersion } from "./useBoard";
 
 export const ORPHANED = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Where a drag is over. Lists: the nearest list. Cards: the card under the pointer; else the
+ * list under the pointer (an empty list, or below its last card); else the nearest card (the
+ * keyboard, which has no pointer). Plain closestCorners had to choose between a one-card
+ * list's container and its card, two nearly equal rectangles, and the winner depended on
+ * registration order: a drop on a card sometimes went to the end of the list.
+ */
+const collision: CollisionDetection = (args) => {
+  const only = (prefix: string) => args.droppableContainers.filter((c) => String(c.id).startsWith(prefix));
+  if (String(args.active.id).startsWith("list:")) return closestCorners({ ...args, droppableContainers: only("list:") });
+  const under = pointerWithin(args);
+  const card = under.find((c) => String(c.id).startsWith("card:"));
+  if (card) return [card];
+  const list = under.find((c) => String(c.id).startsWith("drop:"));
+  if (list) return [list];
+  return closestCorners({ ...args, droppableContainers: only("card:") });
+};
 type Panel = "trash" | "unsent" | "history" | "members" | "bug" | null;
 
 export function BoardPage({ boardId, title, me }: { boardId: string; title: string; me: Me }) {
@@ -122,7 +141,7 @@ const DndArea = memo(function DndArea({ client, me, onOpen }: { client: SyncClie
     client.moveCard(card, listId, index);
   }, [client]);
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={collision} onDragEnd={onDragEnd}>
       <Lists client={client} me={me} onOpen={onOpen} />
     </DndContext>
   );
