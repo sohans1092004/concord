@@ -1,0 +1,175 @@
+# Concord for the trial, on one VM. See docs/runbook.md.
+#   cd deploy/prod && ./gen-env.sh concord-<me>.duckdns.org   # once: writes .env (never committed)
+#   docker compose up -d --build --wait
+#
+# Only Caddy publishes ports (80, 443): Let's Encrypt for $CONCORD_DOMAIN, HSTS and security
+# headers, and the one way in. Postgres, Redis, the Session instances and the gateway stay on
+# the internal network. Two Session instances, so a board's owner can fail over (SPEC §2.4).
+#
+# Memory: every JVM has an explicit heap and every container a limit (docs/runbook.md, "Memory").
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+x-server: &server
+  <<: *logging
+  image: concord:prod
+  build:
+    context: ../..
+    dockerfile: server/Dockerfile
+    target: runtime
+  restart: unless-stopped
+
+x-env: &env
+  CONCORD_ENV: prod
+  CONCORD_DB_URL: jdbc:postgresql://postgres:5432/concord
+  CONCORD_DB_USER: concord
+  CONCORD_DB_PASSWORD: ${POSTGRES_PASSWORD:?run gen-env.sh}
+  CONCORD_DB_POOL: "8"
+  CONCORD_REDIS_URL: redis://redis:6379
+  CONCORD_INTERNAL_SECRET: ${CONCORD_INTERNAL_SECRET:?run gen-env.sh}
+
+x-session: &session
+  <<: *server
+  command: ["/app/session/bin/session"]
+  stop_grace_period: 20s # graceful handover: flush, snapshot, release (SPEC §2.4)
+  mem_limit: 640m
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD", "curl", "-fs", "http://localhost:7000/healthz"]
+    interval: 10s
+    retries: 30
+
+services:
+  postgres:
+    <<: *logging
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["postgres", "-c", "shared_buffers=96MB", "-c", "max_connections=60"]
+    environment:
+      POSTGRES_DB: concord
+      POSTGRES_USER: concord
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run gen-env.sh}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "concord", "-d", "concord"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    <<: *logging
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    # Leases, fence counters, fan-out and presence: all rebuildable from Postgres (SPEC §5.2),
+    # so no persistence. noeviction: a lease must never be evicted to make room.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 30
+
+  migrate:
+    <<: *server
+    restart: "no"
+    command: ["java", "-cp", "/app/session/lib/*", "dev.concord.common.Migrate"]
+    mem_limit: 256m
+    environment:
+      <<: *env
+      JAVA_OPTS: "-Xmx128m"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  session1:
+    <<: *session
+    environment:
+      <<: *env
+      CONCORD_INSTANCE_ID: session1
+      CONCORD_ADVERTISE: ws://session1:7000/internal
+      JAVA_OPTS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m"
+  session2:
+    <<: *session
+    environment:
+      <<: *env
+      CONCORD_INSTANCE_ID: session2
+      CONCORD_ADVERTISE: ws://session2:7000/internal
+      JAVA_OPTS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m"
+
+  gateway:
+    <<: *server
+    command: ["/app/gateway/bin/gateway"]
+    stop_grace_period: 15s # RECONNECT_ELSEWHERE to every client, then stop (SPEC §8 row 15)
+    mem_limit: 512m
+    environment:
+      <<: *env
+      CONCORD_PORT: "8080"
+      CONCORD_WEB_DIR: /app/web
+      CONCORD_PUBLIC_ORIGIN: https://${CONCORD_DOMAIN:?run gen-env.sh}
+      CONCORD_ALLOWED_ORIGINS: https://${CONCORD_DOMAIN}
+      CONCORD_INVITE_CODE: ${CONCORD_INVITE_CODE:?run gen-env.sh}
+      CONCORD_TRUSTED_PROXY: caddy
+      JAVA_OPTS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
+      interval: 10s
+      retries: 30
+
+  caddy:
+    <<: *logging
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    ports: ["80:80", "443:443"]
+    environment:
+      CADDY_SITE: ${CONCORD_DOMAIN} # the rehearsal sets ":80": the tunnel does the TLS
+      ACME_EMAIL: ${ACME_EMAIL:?run gen-env.sh}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      gateway: { condition: service_healthy }
+
+  # Nightly encrypted pg_dump to off-machine storage, 14 days kept (docs/runbook.md, "Backups").
+  backup:
+    <<: *server
+    image: concord-backup:prod
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+      target: backup
+    command: ["/app/backup/schedule.sh"]
+    mem_limit: 384m
+    environment:
+      <<: *env
+      JAVA_OPTS: "-Xmx192m"
+      AGE_RECIPIENT: ${AGE_RECIPIENT:?run gen-env.sh}
+      BACKUP_REMOTE: ${BACKUP_REMOTE:?run gen-env.sh}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-3}
+      BACKUP_KEEP_DAYS: "14"
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      RCLONE_CONFIG_REMOTE_TYPE: ${RCLONE_CONFIG_REMOTE_TYPE:-}
+      RCLONE_CONFIG_REMOTE_ACCOUNT: ${RCLONE_CONFIG_REMOTE_ACCOUNT:-}
+      RCLONE_CONFIG_REMOTE_KEY: ${RCLONE_CONFIG_REMOTE_KEY:-}
+      RCLONE_CONFIG_REMOTE_PROVIDER: ${RCLONE_CONFIG_REMOTE_PROVIDER:-}
+      RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID: ${RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_REMOTE_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_REMOTE_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_REMOTE_ENDPOINT: ${RCLONE_CONFIG_REMOTE_ENDPOINT:-}
+      RCLONE_CONFIG_REMOTE_REGION: ${RCLONE_CONFIG_REMOTE_REGION:-}
+    volumes: [backupstate:/state]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  backupstate:

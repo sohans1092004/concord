@@ -1,0 +1,34 @@
+# The production stack on a laptop, for the rehearsal (Phase 4a): reached from the internet
+# through a Cloudflare quick tunnel (a temporary https://<random>.trycloudflare.com address),
+# with an S3 endpoint (rclone serve s3) standing in for the backup bucket (the same S3 path as Oracle Object Storage).
+#   deploy/prod/rehearse.sh up      # does all of it; see the script
+# Nothing is published on the laptop: the tunnel dials out.
+services:
+  caddy:
+    ports: !reset []
+    environment:
+      CADDY_SITE: ":80" # the tunnel does the TLS
+
+  tunnel:
+    image: cloudflare/cloudflared:2024.8.2
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--url", "http://caddy:80"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Stands in for B2 / Oracle Object Storage: an S3 endpoint (rclone serve s3), off the
+  # database's disk at least. MinIO no longer publishes community images.
+  minio:
+    image: rclone/rclone:1.68.1
+    restart: unless-stopped
+    command: ["serve", "s3", "/data", "--addr", ":9000", "--auth-key", "rehearsal,${MINIO_ROOT_PASSWORD:?set by rehearse.sh}"]
+    volumes: [miniodata:/data]
+
+  backup:
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+
+volumes:
+  miniodata:

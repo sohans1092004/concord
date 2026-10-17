@@ -5,3 +5,7 @@ build/
 *.log
 .fuzz-failures/
 coverage/
+deploy/prod/.env
+deploy/prod/restore-work.*
+deploy/rehearsal/.env
+*.key

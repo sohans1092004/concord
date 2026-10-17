@@ -1,0 +1,25 @@
+# HTTPS for Concord (and, later, Reliant on the same VM: docs/runbook.md, "Adding Reliant").
+# Caddy gets and renews a Let's Encrypt certificate for $CADDY_SITE (= CONCORD_DOMAIN) by itself;
+# ports 80 and 443 must reach this VM. In the local rehearsal CADDY_SITE is ":80" and a
+# Cloudflare quick tunnel does the TLS (compose.rehearsal.yaml).
+{
+	email {$ACME_EMAIL}
+}
+
+{$CADDY_SITE} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	# The gateway serves the web app, the REST API and /ws. The Content-Security-Policy comes
+	# from the gateway. X-Forwarded-For is set to exactly the connecting client's address, which
+	# the gateway believes only because the request comes from Caddy (amendment 23).
+	reverse_proxy gateway:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
