@@ -1,6 +1,6 @@
 #!/bin/bash
 # Restore a backup and verify it (Phase 4a step 5). Run from deploy/prod on any machine with
-# Docker, the images built (docker compose build) and .env present (for the storage settings).
+# Docker and .env present (the storage settings, and CONCORD_TAG: the images it pulls).
 #
 #   ./restore.sh <age-identity-file> [latest|<backup-file.tar.age>] [--into-prod]
 #
@@ -40,7 +40,7 @@ echo "manifest: $(head -c 300 "$work/manifest.json")..."
 
 verify() { # $1: network, $2: JDBC URL, $3: user, $4: password
   docker run --rm --network "$1" -v "$work:/work" -e CONCORD_ENV=dev -e CONCORD_DB_URL="$2" -e CONCORD_DB_USER="$3" \
-    -e CONCORD_DB_PASSWORD="$4" -e JAVA_OPTS=-Xmx256m concord:prod \
+    -e CONCORD_DB_PASSWORD="$4" -e JAVA_OPTS=-Xmx256m "ghcr.io/sohans1092004/concord-server:$(grep ^CONCORD_TAG= .env | cut -d= -f2)" \
     java -cp '/app/session/lib/*' dev.concord.session.Backup verify /work/manifest.json
 }
 

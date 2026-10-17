@@ -1,6 +1,11 @@
 # Concord for the trial, on one VM. See docs/runbook.md.
-#   cd deploy/prod && ./gen-env.sh concord-<me>.duckdns.org   # once: writes .env (never committed)
-#   docker compose up -d --build --wait
+#   cd deploy/prod && ./gen-env.sh concord-serve.duckdns.org <email>   # once: writes .env (never committed)
+#   docker compose pull && docker compose up -d --wait
+#
+# Images: ghcr.io/sohans1092004/concord-server and concord-backup, built and published by CI for
+# every commit on main (.github/workflows/ci.yml, "publish"), pinned by CONCORD_TAG in .env to a
+# full commit SHA, never "latest". The VM never builds. To build from source instead (a laptop):
+#   docker compose -f compose.yaml -f compose.build.yaml build
 #
 # Only Caddy publishes ports (80, 443): Let's Encrypt for $CONCORD_DOMAIN, HSTS and security
 # headers, and the one way in. Postgres, Redis, the Session instances and the gateway stay on
@@ -22,11 +27,7 @@ x-logging: &logging
 
 x-server: &server
   <<: *logging
-  image: concord:prod
-  build:
-    context: ../..
-    dockerfile: server/Dockerfile
-    target: runtime
+  image: ghcr.io/sohans1092004/concord-server:${CONCORD_TAG:?set CONCORD_TAG in .env to a published commit SHA}
   restart: unless-stopped
 
 x-env: &env
@@ -150,11 +151,7 @@ services:
   # Nightly encrypted pg_dump to off-machine storage, 14 days kept (docs/runbook.md, "Backups").
   backup:
     <<: *server
-    image: concord-backup:prod
-    build:
-      context: ../..
-      dockerfile: server/Dockerfile
-      target: backup
+    image: ghcr.io/sohans1092004/concord-backup:${CONCORD_TAG:?set CONCORD_TAG in .env}
     command: ["/app/backup/schedule.sh"]
     mem_limit: 160m
     environment:

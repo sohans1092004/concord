@@ -19,7 +19,9 @@ COPY client-core/ client-core/
 COPY web/package.json web/package-lock.json web/
 RUN cd web && npm ci --no-audit --no-fund
 COPY web/ web/
-RUN cd web && npx vite build
+# The commit the bundle was built from, shown in bug reports (not a secret; CI passes the SHA).
+ARG VITE_BUILD=dev
+RUN cd web && VITE_BUILD=$VITE_BUILD npx vite build
 
 # The JDK, not the JRE: jcmd and jstat inside the container (`docker exec <service> jcmd 1 GC.heap_info`)
 # are how memory is checked on the trial host (docs/runbook.md). Costs about 250 MB of disk.

@@ -1,0 +1,18 @@
+# Build the images from this checkout instead of pulling them (a laptop; never the trial VM,
+# whose 2 GB cannot hold a build next to the running stack). Tag with any CONCORD_TAG, e.g.:
+#   CONCORD_TAG=local docker compose -f compose.yaml -f compose.build.yaml build
+x-build-runtime: &build-runtime
+  build:
+    context: ../..
+    dockerfile: server/Dockerfile
+    target: runtime
+services:
+  migrate: *build-runtime
+  session1: *build-runtime
+  session2: *build-runtime
+  gateway: *build-runtime
+  backup:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+      target: backup

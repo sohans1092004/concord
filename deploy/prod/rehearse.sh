@@ -21,9 +21,9 @@ case "${1:-}" in
     pass=$(grep '^MINIO_ROOT_PASSWORD=' .env | cut -d= -f2 || true)
     [ -n "$pass" ] || pass=$(openssl rand -hex 16)
     setenv MINIO_ROOT_PASSWORD "$pass"
-    dc build
+    dc pull
     if [ ! -f "$key" ]; then
-      docker run --rm --entrypoint age-keygen concord-backup:prod > "$key"
+      docker run --rm --entrypoint age-keygen "ghcr.io/sohans1092004/concord-backup:$(grep ^CONCORD_TAG= .env | cut -d= -f2)" > "$key"
       chmod 600 "$key"
     fi
     setenv AGE_RECIPIENT "$(grep -o 'age1[0-9a-z]*' "$key")"

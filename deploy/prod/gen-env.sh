@@ -17,6 +17,11 @@ cat > .env <<EOF
 # Concord production settings. Generated $(date -u +%FT%TZ) by gen-env.sh. Never commit this file.
 CONCORD_DOMAIN=$host
 ACME_EMAIL=$email
+# The version that runs: a full commit SHA whose images CI published (never "latest"). This is
+# the commit you cloned; if docker compose pull says "manifest unknown", its CI run has not
+# finished publishing yet: wait for it, or use the SHA of the latest green run. Deploys and
+# rollbacks change it: deploy/prod/deploy.sh <sha>.
+CONCORD_TAG=$(git rev-parse HEAD)
 POSTGRES_PASSWORD=$(rand 32)
 CONCORD_INTERNAL_SECRET=$(rand 48)
 # Testers need this to sign up (docs/trial-guide.md). Share it only with them.

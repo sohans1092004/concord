@@ -272,3 +272,58 @@ jobs:
           path: |
             compose.log
             web/test-results/
+
+  # ---- Phase 4a: the images the trial VM pulls (it never builds) ----------------------------
+  # On every push to main, after every test job passed: ghcr.io/sohans1092004/concord-server and
+  # concord-backup, tagged with the full commit SHA (what .env's CONCORD_TAG pins) and "latest"
+  # (for convenience only; deploys never use it). Built natively per architecture: arm64 for the
+  # VM, amd64 so the same tags run on an x86 laptop for rehearsals. A fresh checkout is the build
+  # context, so no .env or key can be in it; .dockerignore excludes them besides.
+
+  publish:
+    name: publish images (${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [vectors, crdt-ts, crdt-java, differential, arm64, server, client-core, e2e, web]
+    strategy:
+      matrix:
+        include:
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64, runner: ubuntu-24.04 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: build and push
+        run: |
+          for pair in runtime:concord-server backup:concord-backup; do
+            target=${pair%%:*}; name=${pair##*:}
+            ref=ghcr.io/sohans1092004/$name:$GITHUB_SHA-${{ matrix.arch }}
+            docker build -f server/Dockerfile --target "$target" --build-arg VITE_BUILD="${GITHUB_SHA::12}" \
+              --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+              --label org.opencontainers.image.revision=$GITHUB_SHA -t "$ref" .
+            docker push "$ref"
+          done
+
+  manifest:
+    name: publish images (one tag for both architectures)
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: <sha> and latest, each for arm64 and amd64
+        run: |
+          for name in concord-server concord-backup; do
+            base=ghcr.io/sohans1092004/$name
+            docker buildx imagetools create -t "$base:$GITHUB_SHA" -t "$base:latest" "$base:$GITHUB_SHA-arm64" "$base:$GITHUB_SHA-amd64"
+            docker buildx imagetools inspect "$base:$GITHUB_SHA" | grep -E "Name:|Platform:"
+          done

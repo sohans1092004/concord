@@ -3,3 +3,13 @@
 **/node_modules/
 **/dist/
 .git/
+# Nothing secret may reach an image, even in a local build from a working tree that has them.
+# (CI builds from a fresh checkout, which never contains these: they are gitignored.)
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+deploy/prod/restore-work.*
+deploy/rehearsal/
+**/test-results*/
+**/playwright-report/
