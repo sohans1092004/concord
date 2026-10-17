@@ -187,6 +187,11 @@ test("cards and lists move with the mouse: reorder, across lists, never into Orp
     await p.mouse.move(t!.x + t!.width / 2, t!.y + (below ? t!.height * 0.9 : t!.height * 0.3), { steps: 15 });
     await p.waitForTimeout(150);
     await p.mouse.up();
+    // dnd-kit stops every click on the page until 50ms after a drop (@dnd-kit/core 6.3.1, the
+    // capture-phase Click listener added in handleStart, removed by detach() after 50ms), so a
+    // click sooner is lost: 10 of 10 clicks at 0ms did nothing, 10 of 10 at 100ms worked. A person
+    // cannot click that fast; the test can.
+    await p.waitForTimeout(100);
   };
   await drag("a1", "a3", true); // reorder down within Left
   await expect.poll(() => titles("Left")).toEqual(["a2", "a3", "a1"]);
