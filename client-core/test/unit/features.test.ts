@@ -254,3 +254,44 @@ describe("§7.3 liveness (amendment 18)", () => {
     client.close();
   });
 });
+
+describe("incremental view (performance, §7.1)", () => {
+  it("always equals the view rebuilt from scratch, through edits, broadcasts, gaps, ACKs and rejections", async () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const x = await joined();
+      let s = seed;
+      const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+      const lists: string[] = [x.client.addList("L0")];
+      const cards: string[] = [];
+      let version = 0;
+      const held: { op: Op; version: number }[] = [];
+      for (let step = 0; step < 120; step++) {
+        const r = rnd();
+        const pendingNow = [...x.client.pendingOps()]; // a copy: the live array changes under us
+        if (r < 0.25) cards.push(x.client.addCard(lists[Math.floor(rnd() * lists.length)]!, `c${step}`));
+        else if (r < 0.32) lists.push(x.client.addList(`L${step}`));
+        else if (r < 0.45 && cards.length) x.client.moveCard(cards[Math.floor(rnd() * cards.length)]!, lists[Math.floor(rnd() * lists.length)]!, 0);
+        else if (r < 0.52 && cards.length) x.client.deleteCard(cards[Math.floor(rnd() * cards.length)]!);
+        else if (r < 0.65 && pendingNow.length) {
+          // the server ACKs the head of our queue
+          x.ws.push({ type: "OP_ACK", op_id: pendingNow[0]!.op_id, version: ++version });
+          x.ws.push({ type: "OP_BROADCAST", op: pendingNow[0], version, user_id: ALICE });
+        } else if (r < 0.7 && pendingNow.length) {
+          x.ws.push({ type: "ERROR", code: "INVALID_OP", op_id: pendingNow[0]!.op_id, detail: "test" });
+        } else if (r < 0.74 && pendingNow.length) {
+          x.ws.push({ type: "ERROR", code: "CLOCK_SKEW", op_id: pendingNow.at(-1)!.op_id, server_time_ms: T0 });
+        } else if (r < 0.85 && lists.length) {
+          // a remote op, sometimes held back to make a gap
+          const op = { op_id: crypto.randomUUID(), board_id: BOARD, hlc: H.encode({ physical_ms: T0 + step, counter: 0, replica_id: OTHER }), replica_id: OTHER,
+            type: "ADD_CARD", card_id: crypto.randomUUID(), placement: { list_id: lists[0]!, position_key: "a" + String.fromCharCode(48 + (step % 10)) }, title: `r${step}` } as Op;
+          held.push({ op, version: ++version });
+          if (rnd() < 0.6) for (const h of held.splice(0).reverse()) x.ws.push({ type: "OP_BROADCAST", op: h.op, version: h.version, user_id: ALICE });
+        } else if (held.length) {
+          for (const h of held.splice(0)) x.ws.push({ type: "OP_BROADCAST", op: h.op, version: h.version, user_id: ALICE });
+        }
+        expect(JSON.stringify(x.client.view()), `seed ${seed} step ${step}`).toBe(JSON.stringify(x.client.rebuiltView()));
+      }
+      x.client.close();
+    }
+  });
+});

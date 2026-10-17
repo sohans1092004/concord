@@ -7,7 +7,14 @@
 //
 // The view is confirmed + ahead + pending, merged. Merge is commutative and idempotent, so an
 // op present in two of them is harmless, and nothing optimistic ever needs undoing by hand:
-// when an op is rejected it leaves `pending` and the view is rebuilt (§7.1).
+// when an op is rejected it leaves `pending` and the view is rebuilt (§7.1). For the same
+// reason the view board is kept up to date by applying each op to it as it arrives, and is
+// rebuilt from scratch only when an op leaves `pending` without being confirmed (a rejection,
+// a re-stamp) or a snapshot replaces the confirmed replica.
+//
+// Saving (§7.1): a change to the queue (an edit, an ACK, a rejection) is saved at once; a
+// change only to the confirmed replica (a broadcast) is saved within a second, since losing it
+// only means catching up again from an older version.
 //
 // Rejections (§7.4): CLOCK_SKEW re-stamps and resends under the same op_id; RETRY_LATER and
 // UNAVAILABLE keep the op and resend with backoff; INVALID_OP and UNAUTHORIZED move it to
@@ -139,6 +146,13 @@ export class SyncClient {
   private syncInFlight = false;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private viewCache: Board | null = null;
+  /** The confirmed replica's encoding as last saved; null once it has changed. */
+  private confirmedJson: ReturnType<Board["encode"]> | null = null;
+  private queueDirty = false;
+  private confirmedDirty = false;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveInFlight = false;
+  private saveAgain = false;
   private readonly listeners = new Set<() => void>();
   private saving: Promise<void> = Promise.resolve();
   private members_ = new Map<string, Member>();
@@ -288,6 +302,8 @@ export class SyncClient {
     const check = O.checkShape(op);
     if (!check.ok) throw new Error(`client-core: refusing to submit an invalid op: ${check.reason}`);
     this.pending.push(op as Op);
+    this.viewCache?.apply(op as Op);
+    this.queueDirty = true;
     this.changed();
     this.sendOp(op as Op);
     return op as Op;
@@ -359,6 +375,7 @@ export class SyncClient {
 
   /** Stops for good: no reconnects, no timers. Pending ops stay saved for the next open. */
   close(): void {
+    if (this.queueDirty || this.confirmedDirty) this.saveNow();
     this.status_ = "closed";
     this.clearTimers();
     const g = globalThis as { removeEventListener?: (t: string, f: () => void) => void };
@@ -533,18 +550,28 @@ export class SyncClient {
   private catchUp(m: Msg): void {
     if (m.snapshot !== undefined) {
       this.confirmed = Board.decode(m.snapshot);
+      this.viewCache = null;
+      this.confirmedJson = null;
     } else {
       for (const e of m.ops as { op: Op; version: number; user_id?: string }[]) {
         this.learnUser(e.op, e.user_id);
         if (this.version === null || e.version > this.version) {
-          this.confirmed.apply(e.op);
+          this.applyConfirmed(e.op);
           this.observe(e.op);
         }
       }
     }
     this.version = m.version as number;
+    this.confirmedDirty = true;
     for (const v of [...this.ahead.keys()]) if (v <= this.version) this.ahead.delete(v);
     this.drain();
+  }
+
+  private applyConfirmed(op: Op): void {
+    this.confirmed.apply(op);
+    this.viewCache?.apply(op); // already there if it was ours or ahead: applying twice is a no-op
+    this.confirmedJson = null;
+    this.confirmedDirty = true;
   }
 
   /** A confirmed op at `version`, from a broadcast or our own ACK. */
@@ -552,6 +579,7 @@ export class SyncClient {
     this.observe(op);
     if (this.version !== null && version <= this.version) return;
     this.ahead.set(version, op);
+    this.viewCache?.apply(op);
     if (this.version === null) return; // before JOINED: hold it
     // §6.4: version v arrived while we last had v-2 or lower: ask before applying anything newer.
     const gap = version > this.version + 1;
@@ -563,7 +591,7 @@ export class SyncClient {
     if (this.version === null) return;
     for (let next = this.ahead.get(this.version + 1); next; next = this.ahead.get(this.version + 1)) {
       this.ahead.delete(this.version + 1);
-      this.confirmed.apply(next);
+      this.applyConfirmed(next);
       this.version++;
     }
   }
@@ -572,6 +600,7 @@ export class SyncClient {
     const i = this.pending.findIndex((p) => p.op_id === opId);
     if (i < 0) return;
     const [op] = this.pending.splice(i, 1);
+    this.queueDirty = true;
     this.deferred.delete(opId);
     this.resendAttempt = 0;
     this.log("acked", { op_id: opId, version });
@@ -609,6 +638,8 @@ export class SyncClient {
         this.status_ = "unauthorized";
         for (const op of this.pending) this.unsent.push({ op, code, detail, at: this.now() });
         this.pending = [];
+        this.viewCache = null;
+        this.queueDirty = true;
         this.ws?.close(1000, "unauthorized");
       } else if (this.syncInFlight) {
         this.syncInFlight = false;
@@ -631,6 +662,8 @@ export class SyncClient {
         this.clock = H.tick(this.clock, this.physicalNow());
         const restamped = { ...op, hlc: H.encode(this.clock), replica_id: this.replicaId } as Op;
         this.pending[i] = restamped;
+        this.viewCache = null;
+        this.queueDirty = true;
         this.sendOp(restamped);
         break;
       }
@@ -650,6 +683,8 @@ export class SyncClient {
         this.pending.splice(i, 1);
         this.deferred.delete(op.op_id);
         this.unsent.push({ op, code, detail, at: this.now() });
+        this.viewCache = null;
+        this.queueDirty = true;
     }
   }
 
@@ -741,19 +776,57 @@ export class SyncClient {
   }
 
   private changed(): void {
-    this.viewCache = null;
     this.checkMoves();
+    if (this.queueDirty) this.saveNow();
+    else if (this.confirmedDirty && !this.saveTimer) this.saveTimer = setTimeout(() => this.saveNow(), 1_000);
+    this.emit();
+  }
+
+  /**
+   * Saves everything now (§7.2 step 2 for edits); the confirmed encoding is reused if unchanged.
+   * One write at a time: changes made while one is in flight are written together, as the
+   * latest state, the moment it finishes, so a burst of edits reaches IndexedDB in two writes.
+   */
+  private saveNow(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    if (this.saveInFlight) {
+      this.saveAgain = true;
+      return;
+    }
+    this.queueDirty = this.confirmedDirty = false;
+    this.confirmedJson ??= this.confirmed.encode();
     const state: Saved = {
       replicaId: this.replicaId,
       hlc: this.clock,
       offsetMs: this.offsetMs,
-      confirmed: this.confirmed.encode(),
+      confirmed: this.confirmedJson,
       version: this.version,
-      pending: this.pending,
-      unsent: this.unsent,
+      pending: [...this.pending],
+      unsent: [...this.unsent],
     };
-    this.saving = this.saving.then(() => this.storage.save(state)).catch((e) => this.log("save_failed", { error: String(e) }));
-    this.emit();
+    this.saveInFlight = true;
+    this.saving = this.storage.save(state).catch((e) => this.log("save_failed", { error: String(e) })).then(() => {
+      this.saveInFlight = false;
+      if (this.saveAgain) {
+        this.saveAgain = false;
+        this.saveNow();
+        return this.saving;
+      }
+    });
+  }
+
+  /** Resolves once everything changed so far is in storage. */
+  async saved(): Promise<void> {
+    while (this.saveInFlight || this.saveAgain) await this.saving;
+  }
+
+  /** The view rebuilt from scratch: what the incrementally kept view must always equal. For tests. */
+  rebuiltView(): View {
+    const b = this.confirmed.clone();
+    for (const op of this.ahead.values()) b.apply(op);
+    for (const op of this.pending) b.apply(op);
+    return b.view();
   }
 
   private emit(): void {
@@ -765,12 +838,16 @@ export class SyncClient {
     this.clock = s.hlc;
     this.offsetMs = s.offsetMs;
     this.confirmed = Board.decode(s.confirmed);
+    this.confirmedJson = s.confirmed;
+    this.viewCache = null;
     this.version = s.version;
     this.pending = [...s.pending];
     this.unsent = [...s.unsent];
   }
 
   private clearTimers(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     if (this.silenceTimer) clearInterval(this.silenceTimer);
     this.silenceTimer = null;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
