@@ -1,6 +1,9 @@
 # Walkthrough: one op, from a client's send to every other client's view
 
-This follows one edit, "add a card", through every process it touches in Phase 2. Each step
+This follows one edit, "add a card", through every process it touches in Phase 2. File and
+line references are as of the end of Phase 2 (commit `d4db821`); Phase 3 moved some lines and
+replaced the JWT with a WebSocket ticket. The client's half, current, is in
+`docs/walkthrough-phase3.md`. Each step
 names the file and line where it happens, so you can read the code in the same order the op
 travels. Read it beside the code; the SPEC sections are the rules each step implements.
 
@@ -35,7 +38,7 @@ state. Exactly one Session instance, the board's *owner*, holds a board in memor
 ## 2. The gateway receives it (SPEC §2.1, §9.4)
 
 5. The connection was authenticated once, at upgrade: `wsBeforeUpgrade` checks the Origin
-   allowlist and the JWT, `server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java:52`.
+   allowlist and the credential (a JWT in Phase 2; since Phase 3 a single-use ticket, §9.4), `server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java:52`.
    Frames over 64 KB close the connection (Jetty limit, `GatewayMain.java:41`).
 6. Jetty delivers the frame to `onMessage`, `GatewayMain.java:67`, which hands it to this
    connection's `ClientConn.onMessage`, `ClientConn.java:79`.
@@ -49,7 +52,7 @@ state. Exactly one Session instance, the board's *owner*, holds a board in memor
    owner's reference checks need a client's `ADD_LIST` to arrive before its `ADD_CARD`.
 10. `op()`, `ClientConn.java:137`, checks the op is for the joined board and forwards
     `{"k":"OP","board_id","user_id","op"}`, waiting for the reply, `ClientConn.java:149`.
-    The `user_id` comes from the verified JWT, never from the client's JSON.
+    The `user_id` comes from the verified credential, never from the client's JSON.
 
 ## 3. Finding the owner (SPEC §2.3)
 

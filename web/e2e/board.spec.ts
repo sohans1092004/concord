@@ -147,3 +147,45 @@ test("presence: who is on the board and which card they have open (§1.1)", asyn
   await expect(pa.locator(".who .avatar")).toHaveCount(0);
   await a.close();
 });
+
+test("cards and lists move with the mouse: reorder, across lists, never into Orphaned", async ({ browser }) => {
+  const a = await browser.newContext();
+  await signUp(a, "Mouse User");
+  const board = await createBoard(a, "Mouse");
+  const p = await a.newPage();
+  if (process.env.DEBUG_DND) p.on("console", (m) => m.text().startsWith("DRAGEND") && console.log(m.text()));
+  await openBoard(p, board);
+  await p.evaluate(() => {
+    const c = window.concord!.client;
+    const l = c.addList("Left");
+    const r = c.addList("Right");
+    for (const t of ["a1", "a2", "a3"]) c.addCard(l, t);
+    c.addCard(r, "b1");
+  });
+  const titles = (list: string) => p.getByTestId("list").filter({ hasText: list }).locator(".card-title").allTextContents();
+  await expect.poll(() => titles("Left")).toEqual(["a1", "a2", "a3"]);
+  const drag = async (from: string, to: string, below = false) => {
+    const f = await p.getByTestId("card").filter({ hasText: from }).boundingBox();
+    const t = await p.getByTestId("card").filter({ hasText: to }).boundingBox();
+    await p.mouse.move(f!.x + f!.width / 2, f!.y + f!.height / 2);
+    await p.mouse.down();
+    await p.mouse.move(f!.x + f!.width / 2 + 10, f!.y + f!.height / 2 + 10, { steps: 5 });
+    await p.mouse.move(t!.x + t!.width / 2, t!.y + (below ? t!.height * 0.9 : t!.height * 0.3), { steps: 15 });
+    await p.waitForTimeout(150);
+    await p.mouse.up();
+  };
+  await drag("a1", "a3", true); // reorder down within Left
+  await expect.poll(() => titles("Left")).toEqual(["a2", "a3", "a1"]);
+  await drag("a2", "b1"); // across lists, before b1
+  await expect.poll(() => titles("Right")).toEqual(["a2", "b1"]);
+  await expect.poll(() => titles("Left")).toEqual(["a3", "a1"]);
+
+  // Orphaned accepts nothing (§3.6): delete Right, then try to drop a card onto its orphans.
+  await p.getByRole("button", { name: "Delete list Right" }).click();
+  await expect.poll(() => titles("Orphaned")).toEqual(["a2", "b1"]);
+  await drag("a3", "b1");
+  await expect.poll(() => titles("Left")).toEqual(["a3", "a1"]);
+  await expect.poll(() => titles("Orphaned")).toEqual(["a2", "b1"]);
+  await settled(p);
+  await a.close();
+});

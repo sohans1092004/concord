@@ -96,6 +96,7 @@ test("2,000 cards, 10 editors: each update renders in under 16ms", async ({ brow
     console.log("probe:", JSON.stringify(probe));
   }
 
+  if (process.env.PERF_CPU) await (await ctx.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.PERF_CPU) });
   const cdp = process.env.PERF_PROFILE ? await ctx.newCDPSession(page) : null;
   if (cdp) {
     await cdp.send("Profiler.enable");

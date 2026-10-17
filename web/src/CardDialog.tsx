@@ -78,7 +78,9 @@ function Field({ label, value, onSave, disabled, max, multiline, autoFocus }: { 
 function Labels({ value, onSave, disabled }: { value: string[]; onSave: (l: string[]) => void; disabled: boolean }) {
   const [draft, setDraft] = useState(value.join(", "));
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => setDraft(value.join(", ")), [value]);
+  // By content: `value` is a new array on every render, and a reset mid-typing would lose input.
+  const shown = value.join(", ");
+  useEffect(() => setDraft(shown), [shown]);
   const pending = useRef({ draft, value, save: (_: string) => {} });
   useEffect(() => () => {
     if (pending.current.draft !== pending.current.value.join(", ")) pending.current.save(pending.current.draft);
