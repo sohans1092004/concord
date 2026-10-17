@@ -12,10 +12,13 @@ const EDITORS = 10, CARDS = 2_000, SECONDS = Number(process.env.PERF_SECONDS ?? 
 
 async function editorSession(i: number): Promise<{ id: string; email: string; session: string }> {
   const email = `perf-${i}-${crypto.randomUUID().slice(0, 8)}@trial.example`;
-  const r = await fetch(`${GATEWAY}/api/auth/sign-up`, {
+  const once = () => fetch(`${GATEWAY}/api/auth/sign-up`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, name: `Editor ${i}`, password: "correct horse battery" }),
   });
+  // Node's fetch can reuse a keep-alive connection the server has just closed (ECONNRESET);
+  // the request never reached the server, so sending it again is safe.
+  const r = await once().catch(once);
   expect(r.status).toBe(201);
   const session = /concord_session=([^;]+)/.exec(r.headers.get("set-cookie") ?? "")![1]!;
   return { ...((await r.json()) as { id: string }), email, session };
