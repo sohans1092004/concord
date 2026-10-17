@@ -398,7 +398,7 @@ public final class BoardActor {
                 continue;
             }
             long v = c.versions().get(next++);
-            applyCommitted(w.pending().op(), w.pending().json(), v);
+            applyCommitted(w.pending().op(), w.pending().json(), v, w.pending().userId());
             for (Reply r : w.replies()) r.send(Msg.ack(opId, v));
         }
         rebalanceIfNeeded(waiting.stream().map(w -> w.pending().op()).toList());
@@ -455,7 +455,7 @@ public final class BoardActor {
     }
 
     /** Step 4, for one committed op: apply to memory, remember its ACK, publish. */
-    private void applyCommitted(Op op, Map<String, Object> json, long v) {
+    private void applyCommitted(Op op, Map<String, Object> json, long v, String userId) {
         try {
             clock = clock.receive(op.hlc(), d.clock().getAsLong()); // our next op outranks every applied one
         } catch (RuntimeException e) {
@@ -466,7 +466,7 @@ public final class BoardActor {
         version = v;
         lru.put(op.opId(), v);
         opsSinceSnapshot++;
-        d.publisher().publish(id, Msg.encode(Msg.broadcast(json, v)));
+        d.publisher().publish(id, Msg.encode(Msg.broadcast(json, v, userId)));
     }
 
     /**
@@ -483,7 +483,7 @@ public final class BoardActor {
                     close(Msg.NOT_OWNER, "fenced out while reconciling");
                     return;
                 }
-                for (Store.Stored s : r.ops()) applyCommitted(s.op(), s.json(), s.version());
+                for (Store.Stored s : r.ops()) applyCommitted(s.op(), s.json(), s.version(), s.userId());
                 log.atInfo().addKeyValue("board_id", id).addKeyValue("recovered_ops", r.ops().size())
                         .addKeyValue("version", version).log("reconciled after commit failure");
                 state = State.SERVING;
@@ -538,6 +538,12 @@ public final class BoardActor {
         if (type.equals("JOINED")) {
             m.put("server_time_ms", d.clock().getAsLong());
             m.put("role", role);
+            try {
+                m.put("members", d.store().members(id)); // SPEC §7.5: user_id → {name, role}
+            } catch (SQLException e) {
+                reply.send(Msg.error(Msg.RETRY_LATER, null, "storage unavailable"));
+                return;
+            }
         }
         reply.send(m);
     }
@@ -561,7 +567,7 @@ public final class BoardActor {
     }
 
     private static List<Map<String, Object>> entries(List<Store.Stored> ops) {
-        return ops.stream().map(s -> Msg.obj("op", s.json(), "version", s.version())).toList();
+        return ops.stream().map(s -> Msg.obj("op", s.json(), "version", s.version(), "user_id", s.userId())).toList();
     }
 
     // ---- snapshots and handover ----------------------------------------------------------

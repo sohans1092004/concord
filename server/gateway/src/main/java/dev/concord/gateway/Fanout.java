@@ -124,7 +124,7 @@ final class Fanout implements AutoCloseable {
                 Map<?, ?> entry = (Map<?, ?>) e;
                 @SuppressWarnings("unchecked")
                 Map<String, Object> op = (Map<String, Object>) entry.get("op");
-                deliver(board, Msg.encode(Msg.broadcast(op, (Long) entry.get("version"))));
+                deliver(board, Msg.encode(Msg.broadcast(op, (Long) entry.get("version"), (String) entry.get("user_id"))));
             }
             Map<Object, Consumer<String>> m = clients.get(board);
             if (m != null) {

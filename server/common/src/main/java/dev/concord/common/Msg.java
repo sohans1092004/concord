@@ -55,15 +55,16 @@ public final class Msg {
         return obj("type", "OP_ACK", "op_id", opId, "version", version);
     }
 
-    public static Map<String, Object> broadcast(Map<String, Object> op, long version) {
-        return obj("type", "OP_BROADCAST", "op", op, "version", version);
+    /** SPEC §7.5: a committed op, its version and the user who made it. */
+    public static Map<String, Object> broadcast(Map<String, Object> op, long version, String userId) {
+        return obj("type", "OP_BROADCAST", "op", op, "version", version, "user_id", userId);
     }
 
     public static Map<String, Object> boardVersion(long version) {
         return obj("type", "BOARD_VERSION", "version", version);
     }
 
-    /** JOINED or SYNC: exactly one of ops (a list of {op, version}) and snapshot is set. */
+    /** JOINED or SYNC: exactly one of ops (a list of {op, version, user_id}) and snapshot is set. */
     public static Map<String, Object> catchUp(String type, List<Map<String, Object>> ops, Object snapshot, long version) {
         Map<String, Object> m = obj("type", type);
         if (snapshot != null) m.put("snapshot", snapshot);

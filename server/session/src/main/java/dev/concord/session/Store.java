@@ -38,7 +38,8 @@ public class Store {
     public record Pending(Op op, Map<String, Object> json, String userId) {}
 
     /** A committed op read back from board_ops. */
-    public record Stored(long version, Map<String, Object> json, Op op) {}
+    /** A committed op, with the user who sent it (SYSTEM_USER for the owner's own rebalancing). */
+    public record Stored(long version, Map<String, Object> json, Op op, String userId) {}
 
     /** Outcome of a group commit. {@code fenced}: a newer owner exists and nothing was written. */
     public record Committed(boolean fenced, Map<String, Long> duplicates, List<Long> versions) {}
@@ -286,7 +287,7 @@ public class Store {
     private static List<Stored> opsAfter(Connection c, String board, long version, int limit) throws SQLException {
         List<Stored> out = new ArrayList<>();
         try (PreparedStatement q = c.prepareStatement(
-                "SELECT version, payload::text FROM board_ops WHERE board_id = ? AND version > ? ORDER BY version LIMIT ?")) {
+                "SELECT version, payload::text, user_id::text FROM board_ops WHERE board_id = ? AND version > ? ORDER BY version LIMIT ?")) {
             q.setObject(1, UUID.fromString(board));
             q.setLong(2, version);
             q.setInt(3, limit);
@@ -294,7 +295,7 @@ public class Store {
                 while (r.next()) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> json = (Map<String, Object>) Json.parse(r.getString(2));
-                    out.add(new Stored(r.getLong(1), json, Op.parse(json)));
+                    out.add(new Stored(r.getLong(1), json, Op.parse(json), r.getString(3)));
                 }
             }
         }
@@ -302,6 +303,19 @@ public class Store {
     }
 
     // ---- membership, SPEC §4.2 step 2 -------------------------------------------------------
+
+    /** Every member: user ID → {name, role}, for JOINED (SPEC §7.5). */
+    public Map<String, Object> members(String board) throws SQLException {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        try (Connection c = ds.getConnection(); PreparedStatement q = c.prepareStatement(
+                "SELECT m.user_id::text, u.name, m.role FROM board_members m JOIN users u ON u.id = m.user_id WHERE m.board_id = ? ORDER BY m.user_id")) {
+            q.setObject(1, UUID.fromString(board));
+            try (ResultSet r = q.executeQuery()) {
+                while (r.next()) out.put(r.getString(1), dev.concord.common.Msg.obj("name", r.getString(2), "role", r.getString(3)));
+            }
+        }
+        return out;
+    }
 
     /** The user's role on the board, or null if not a member. */
     public String role(String board, String user) throws SQLException {

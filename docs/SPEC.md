@@ -669,11 +669,15 @@ JSON frames for v1.
 | Client → server | `OP` | `op` |
 | Client → server | `SYNC_REQUEST` | `board_id`, `since_version` |
 | Client → server | `PRESENCE` | `board_id`, `card_id` or null, `state` |
-| Server → client | `JOINED` | `ops` or `snapshot`, `version`, `server_time_ms`, `role` |
+| Server → client | `JOINED` | `ops` or `snapshot`, `version`, `server_time_ms`, `role`, `members` (`user_id` → `{name, role}`) |
 | Server → client | `OP_ACK` | `op_id`, `version` |
-| Server → client | `OP_BROADCAST` | `op`, `version` |
+| Server → client | `OP_BROADCAST` | `op`, `version`, `user_id` |
 | Server → client | `BOARD_VERSION` | `version` |
 | Server → client | `SYNC` | `ops` or `snapshot`, `version` |
+
+Each entry of `ops` in `JOINED` and `SYNC` is `{op, version, user_id}`: `user_id` is the user
+who sent the op (`board_ops.user_id`; the nil UUID for the owner's own rebalancing ops), so a
+client can name who made a change, for example "moved by {name}" (§3.5).
 | Server → client | `PRESENCE_UPDATE` | `user_id`, `card_id`, `state` |
 | Server → client | `RECONNECT_ELSEWHERE` | sent before a gateway drains |
 | Server → client | `ERROR` | `code`, `op_id`, `detail`, and `server_time_ms` for `CLOCK_SKEW` |
@@ -991,3 +995,4 @@ section text itself is updated in the same commit.
 | 12 | 2026-10-17 | §6.3 | A stale owner that never writes is never fenced and may answer `JOIN`/`SYNC_REQUEST` from stale memory (a prefix of the committed history); the window is bounded by the gateway's 5s owner cache, and by the stale owner's next renewal when it can reach Redis. |
 | 13 | 2026-10-17 | §6.2 | A renewal that finds the lease gone re-takes it only if `boards.fence` still equals its fence; otherwise it drops the board (`FencingTest.staleOwnerDoesNotRetakeAWipedLease`, guard check `retake-fence-check`). |
 | 14 | 2026-10-17 | §5.1, §9.4 | Sign-in as in Reliant, no JWTs: hashed 30-day session cookie (or Bearer for scripts), argon2id, per-email and per-IP sign-in limits, optional invite code; changing the password revokes other sessions; Origin checked on every state-changing REST call. The WebSocket URL carries a single-use 30s ticket stored hashed in Postgres; expired tickets and sessions are deleted every minute. `users.name`, `sessions`, `ws_tickets` and `bug_reports` added to §5.1. The JWT code, config and secret are deleted. |
+| 15 | 2026-10-17 | §7.5 | `OP_BROADCAST` and each `ops` entry of `JOINED` and `SYNC` carry the sender's `user_id`; `JOINED` carries the board's member map, `user_id` → `{name, role}`. |

@@ -115,6 +115,19 @@ class GatewayTest {
             assertEquals(2L, c.op(card).get("version"));
             var back = a.next(m -> "OP_BROADCAST".equals(m.get("type")) && Long.valueOf(2).equals(m.get("version")));
             assertEquals(card.get("op_id"), ((Map<?, ?>) back.get("op")).get("op_id"));
+            // SPEC §7.5 (amendment 15): every op carries the user who made it.
+            assertEquals(b.users().get(0).get("id"), seen.get("user_id"));
+            assertEquals(b.users().get(1).get("id"), back.get("user_id"));
+        }
+        // JOINED carries the member map and user_id on each op.
+        try (WsClient late = new WsClient(g1.port(), b.token(1), null)) {
+            Map<String, Object> joined = late.join(b.id(), 0L);
+            Map<?, ?> members = (Map<?, ?>) joined.get("members");
+            assertEquals(Map.of("name", b.users().get(0).get("name"), "role", "owner"), members.get(b.users().get(0).get("id")));
+            assertEquals(Map.of("name", b.users().get(1).get("name"), "role", "editor"), members.get(b.users().get(1).get("id")));
+            List<?> entries = (List<?>) joined.get("ops");
+            assertEquals(b.users().get(0).get("id"), ((Map<?, ?>) entries.get(0)).get("user_id"));
+            assertEquals(b.users().get(1).get("id"), ((Map<?, ?>) entries.get(1)).get("user_id"));
         }
     }
 
