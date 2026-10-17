@@ -65,10 +65,12 @@ test("a reload mid-offline loses nothing (§7.1)", async ({ browser }) => {
   await openBoard(p, board);
   await a.setOffline(true);
   await expect(p.getByTestId("status")).toHaveAttribute("data-status", /offline|connecting/, { timeout: 30_000 });
-  const ids = await p.evaluate(() => {
+  const ids = await p.evaluate(async () => {
     const c = window.concord!.client;
     const l = c.addList("Offline list");
-    return [l, c.addCard(l, "first"), c.addCard(l, "second")];
+    const ids = [l, c.addCard(l, "first"), c.addCard(l, "second")];
+    await c.saved();
+    return ids;
   });
   for (let i = 0; i < 3; i++) {
     await p.reload();
@@ -119,14 +121,13 @@ test("tabs adopt a closed tab's queue exactly once (§7.1, Web Locks)", async ({
   await openBoard(closed, board);
   await a.setOffline(true);
   await expect(closed.getByTestId("status")).toHaveAttribute("data-status", /offline|connecting/, { timeout: 30_000 });
-  const made = await closed.evaluate(() => {
+  const made = await closed.evaluate(async () => {
     const c = window.concord!.client;
     const l = c.addList("from the closed tab");
-    const ids = [l];
-    for (let i = 0; i < 9; i++) ids.push(c.addCard(l, `orphan ${i}`));
+    for (let i = 0; i < 9; i++) c.addCard(l, `orphan ${i}`);
+    await c.saved(); // each one durable, then shown
     return c.pendingOps().map((o) => o.op_id);
   });
-  await closed.evaluate(() => window.concord!.client.saved()); // in IndexedDB before the tab goes
   await closed.close(); // its lock is released; its saved queue stays in IndexedDB
 
   // Four new tabs start at once; each tries to adopt the closed tab's queue.
@@ -179,5 +180,38 @@ test("edits rejected after access is revoked offline go to Unsent edits, readabl
   const exported = JSON.parse(await (await import("node:fs/promises")).readFile((await download.path())!, "utf8")) as { op: { title: string }; code: string }[];
   expect(exported.map((u) => [u.op.title, u.code])).toEqual([["Bea's offline card", "UNAUTHORIZED"], ["Another one", "UNAUTHORIZED"]]);
   await a.close();
+  await b.close();
+});
+
+test("an edit on screen survives the tab crashing at once (§7.2 order, amendment 21)", async ({ browser }) => {
+  const a = await browser.newContext();
+  await signUp(a, "Quick Closer");
+  const board = await createBoard(a, "Close fast");
+  const first = await a.newPage();
+  await openBoard(first, board);
+  await first.evaluate(() => window.concord!.client.addList("Inbox"));
+  await settled(first);
+  await a.setOffline(true); // so the edit can only come back from this device
+  await expect(first.getByTestId("status")).toHaveAttribute("data-status", /offline|connecting/, { timeout: 30_000 });
+  await first.getByLabel("New card title").fill("typed, then the tab crashed");
+  await first.getByLabel("New card title").press("Enter");
+  await first.getByTestId("card").filter({ hasText: "typed, then the tab crashed" }).waitFor();
+  // A crash the moment it is on screen: take exactly what is on disk now (IndexedDB, cookies,
+  // localStorage) into a fresh browser context. No pagehide, no unload, no later snapshot.
+  const disk = await a.storageState({ indexedDB: true });
+  await a.close();
+
+  const b = await browser.newContext({ storageState: disk });
+  // The WebSocket answers nothing, so whatever comes back can only have come from the disk,
+  // and stays in the pending queue for us to inspect (online, it would be sent and ACKed).
+  await b.routeWebSocket(/\/ws/, () => {});
+  const again = await b.newPage();
+  await again.goto(`/#/b/${board}`);
+  await again.waitForFunction(() => window.concord !== undefined);
+  await expect(again.getByTestId("card").filter({ hasText: "typed, then the tab crashed" })).toBeVisible();
+  // It came back as an adopted, still-pending edit (the ACKed list op may come too, until a
+  // snapshot drops it from the log; resending it is answered by dedup, §4.3).
+  const adopted = await again.evaluate(() => window.concord!.client.pendingOps().map((o) => (o as { title?: string }).title));
+  expect(adopted).toContain("typed, then the tab crashed");
   await b.close();
 });

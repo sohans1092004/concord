@@ -167,7 +167,7 @@ describe("trash, presence, labels", () => {
     expect(client.trash()).toEqual([]);
   });
 
-  it("sends PRESENCE on join and change, tracks others, and treats 'left' idempotently", async () => {
+  it("sends PRESENCE on join and change, tracks others per connection, and treats 'left' idempotently", async () => {
     const { client, ws } = await joined();
     client.setPresence(null);
     client.setPresence("card-1");
@@ -176,10 +176,15 @@ describe("trash, presence, labels", () => {
       { type: "PRESENCE", board_id: BOARD, card_id: null, state: "active" },
       { type: "PRESENCE", board_id: BOARD, card_id: "card-1", state: "active" },
     ]);
-    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, card_id: "card-9", state: "active" });
+    // Alice on two connections (two tabs): one has a card open, the other is idle.
+    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, connection_id: "c1", card_id: "card-9", state: "active" });
+    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, connection_id: "c2", card_id: null, state: "idle" });
     expect(client.presence().get(ALICE)).toEqual({ cardId: "card-9", state: "active" });
-    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, card_id: null, state: "left" });
-    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, card_id: null, state: "left" }); // a second gateway's sweep
+    // c1 leaves (twice: a second gateway's sweep): Alice is still here, on c2.
+    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, connection_id: "c1", card_id: null, state: "left" });
+    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, connection_id: "c1", card_id: null, state: "left" });
+    expect(client.presence().get(ALICE)).toEqual({ cardId: null, state: "idle" });
+    ws.push({ type: "PRESENCE_UPDATE", user_id: ALICE, connection_id: "c2", card_id: null, state: "left" });
     expect(client.presence().size).toBe(0);
   });
 
@@ -293,5 +298,79 @@ describe("incremental view (performance, §7.1)", () => {
       }
       x.client.close();
     }
+  });
+});
+
+describe("§7.2 order: durable append, then view, then send (amendment 21)", () => {
+  /** MemoryStorage whose appends complete only when the test says so. */
+  class SlowStorage extends MemoryStorage {
+    gates: (() => void)[] = [];
+    override append(op: Op, seq: number): Promise<void> {
+      return new Promise((resolve) => this.gates.push(() => (super.append(op, seq), resolve())));
+    }
+  }
+
+  async function slow() {
+    const storage = new SlowStorage();
+    const sockets: FakeSocket[] = [];
+    const client = await SyncClient.open({
+      urls: ["ws://g/ws"], boardId: BOARD, ticket: () => "t", storage, random: () => 0,
+      connect: (url) => {
+        const s = new FakeSocket(url);
+        sockets.push(s);
+        return s;
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    const ws = sockets[0]!;
+    ws.readyState = 1;
+    ws.onopen?.({});
+    ws.push({ type: "JOINED", snapshot: Board.empty().encode(), version: 0, server_time_ms: Date.now(), role: "editor" });
+    return { client, storage, ws };
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it("an edit is neither shown nor sent until its append is durable", async () => {
+    const { client, storage, ws } = await slow();
+    const list = client.addList("L");
+    expect(client.view().lists).toHaveLength(0);
+    expect(client.pendingOps()).toHaveLength(0);
+    expect(ws.ops()).toHaveLength(0);
+    storage.gates.shift()!();
+    await flush();
+    expect(client.view().lists.map((l) => l.id)).toEqual([list]);
+    expect(ws.ops().map((o) => o.type)).toEqual(["ADD_LIST"]);
+    client.close();
+  });
+
+  it("quick edits keep their order, see each other (distinct keys), and are sent in order", async () => {
+    const { client, storage, ws } = await slow();
+    const list = client.addList("L");
+    const cards = ["one", "two", "three"].map((t) => client.addCard(list, t));
+    while (storage.gates.length) {
+      storage.gates.shift()!();
+      await flush();
+    }
+    await client.saved();
+    const shown = client.view().lists[0]!.cards;
+    expect(shown.map((c) => c.id)).toEqual(cards);
+    expect(new Set(shown.map((c) => c.position_key)).size).toBe(3);
+    expect(ws.ops().map((o) => o.type)).toEqual(["ADD_LIST", "ADD_CARD", "ADD_CARD", "ADD_CARD"]);
+    client.close();
+  });
+
+  it("a reload merges the log after the last snapshot, and the clock never reuses a tick", async () => {
+    const storage = new MemoryStorage();
+    const a = await SyncClient.open({ urls: ["ws://g/ws"], boardId: BOARD, ticket: () => "t", storage, connect: (u) => new FakeSocket(u), random: () => 0 });
+    const ops = [a.submit({ type: "ADD_LIST", list_id: crypto.randomUUID(), placement: { position_key: "a0" }, title: "x" })];
+    ops.push(a.submit({ type: "ADD_LIST", list_id: crypto.randomUUID(), placement: { position_key: "a1" }, title: "y" }));
+    // No snapshot was written (they are coalesced): the edits live only in the log.
+    a.close = () => {}; // a crash: nothing flushed
+    const b = await SyncClient.open({ urls: ["ws://g/ws"], boardId: BOARD, ticket: () => "t", storage, connect: (u) => new FakeSocket(u), random: () => 0 });
+    expect(b.pendingOps().map((o) => o.op_id)).toEqual(ops.map((o) => o.op_id));
+    expect(b.replica).toBe(a.replica);
+    const next = b.submit({ type: "ADD_LIST", list_id: crypto.randomUUID(), placement: { position_key: "a2" }, title: "z" });
+    for (const o of ops) expect(H.compare(next.hlc, o.hlc)).toBeGreaterThan(0);
+    b.close();
   });
 });

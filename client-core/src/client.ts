@@ -12,9 +12,11 @@
 // rebuilt from scratch only when an op leaves `pending` without being confirmed (a rejection,
 // a re-stamp) or a snapshot replaces the confirmed replica.
 //
-// Saving (§7.1): a change to the queue (an edit, an ACK, a rejection) is saved at once; a
-// change only to the confirmed replica (a broadcast) is saved within a second, since losing it
-// only means catching up again from an older version.
+// Saving (§7.1, §7.2, amendment 21): a new edit is appended to the storage's log, and only
+// once that append is durable is it put on the pending queue, shown and sent ("staged" until
+// then). Everything else (ACKs, rejections, broadcasts) is saved as a coalesced snapshot within
+// a second, and on pagehide: losing one only means resending ops the server dedups, or
+// catching up from an older version.
 //
 // Rejections (§7.4): CLOCK_SKEW re-stamps and resends under the same op_id; RETRY_LATER and
 // UNAVAILABLE keep the op and resend with backoff; INVALID_OP and UNAUTHORIZED move it to
@@ -149,6 +151,13 @@ export class SyncClient {
   /** The confirmed replica's encoding as last saved; null once it has changed. */
   private confirmedJson: ReturnType<Board["encode"]> | null = null;
   private queueDirty = false;
+  /** Edits made but not yet durably appended: in planning (keys, tags), not yet shown or sent. */
+  private staged: Op[] = [];
+  private appendSeq = 0;
+  private durableUpTo = 0;
+  private appending: Promise<void> | null = null;
+  private planCache: Board | null = null;
+  private readonly onPageHide = () => this.saveNow();
   private confirmedDirty = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveInFlight = false;
@@ -161,7 +170,10 @@ export class SyncClient {
   /** Our recent moves (§3.5): card → the placement we chose and when it was ACKed (null: pending). */
   private readonly localMoves = new Map<string, { op_id: string; placement: Placement; ackedAt: number | null }>();
   private readonly movedBy_ = new Map<string, MovedBy>();
-  private readonly presence_ = new Map<string, Presence>();
+  /** Presence per connection (amendment 22): connection ID → its user, card and state. */
+  private readonly connections = new Map<string, { userId: string } & Presence>();
+  /** presence() as last computed; reset when a connection changes, so renders reuse it. */
+  private presenceView: Map<string, Presence> | null = null;
   private myPresence: { cardId: string | null; state: "active" | "idle" } | null = null;
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private lastHeard = 0;
@@ -192,6 +204,7 @@ export class SyncClient {
     this.replicaId = this.storage.replicaId ?? this.replicaId;
     const g = globalThis as { addEventListener?: (t: string, f: () => void) => void };
     g.addEventListener?.("offline", this.onOffline);
+    g.addEventListener?.("pagehide", this.onPageHide); // the snapshot, best effort; edits are already durable
     g.addEventListener?.("online", this.onOnline);
     this.clock = H.zero(this.replicaId);
   }
@@ -237,9 +250,22 @@ export class SyncClient {
     return this.movedBy_;
   }
 
-  /** Other users on the board: user ID → which card they have open (§1.1). */
+  /**
+   * Who is on the board (§1.1): user ID → the card they have open (from any of their
+   * connections; the most recently reported one with a card) and whether any connection of
+   * theirs is active. A user stays present while any of their connections is.
+   */
   presence(): ReadonlyMap<string, Presence> {
-    return this.presence_;
+    if (this.presenceView) return this.presenceView;
+    const out = new Map<string, Presence>();
+    for (const c of this.connections.values()) {
+      const p = out.get(c.userId);
+      out.set(c.userId, {
+        cardId: c.cardId ?? p?.cardId ?? null,
+        state: c.state === "active" || p?.state === "active" ? "active" : "idle",
+      });
+    }
+    return (this.presenceView = out);
   }
 
   /** Deleted lists and cards, newest state first by title; restore with restoreList/restoreCard. */
@@ -298,15 +324,43 @@ export class SyncClient {
    */
   submit(body: Body): Op {
     this.clock = H.tick(this.clock, this.physicalNow());
-    const op = { op_id: O.newOpId(), board_id: this.opts.boardId, hlc: H.encode(this.clock), replica_id: this.replicaId, ...body };
+    const op = { op_id: O.newOpId(), board_id: this.opts.boardId, hlc: H.encode(this.clock), replica_id: this.replicaId, ...body } as Op;
     const check = O.checkShape(op);
     if (!check.ok) throw new Error(`client-core: refusing to submit an invalid op: ${check.reason}`);
-    this.pending.push(op as Op);
-    this.viewCache?.apply(op as Op);
-    this.queueDirty = true;
-    this.changed();
-    this.sendOp(op as Op);
-    return op as Op;
+    // §7.2: 2. append it durably; 3. then update the view; 4. then send. In order, one at a time.
+    const seq = ++this.appendSeq;
+    this.staged.push(op);
+    this.planCache?.apply(op);
+    const durable = () => {
+      this.staged.shift();
+      this.durableUpTo = seq;
+      this.pending.push(op);
+      this.viewCache?.apply(op);
+      this.queueDirty = true;
+      this.changed();
+      this.sendOp(op);
+    };
+    const failed = (e: unknown) => {
+      // Storage refused (quota, a closed database): keep the edit in memory rather than drop it.
+      this.log("append_failed", { op_id: op.op_id, error: String(e) });
+      durable();
+    };
+    const write = () => {
+      try {
+        const r = this.storage.append(op, seq);
+        return r ? r.then(durable, failed) : (durable(), undefined);
+      } catch (e) {
+        failed(e);
+        return undefined;
+      }
+    };
+    const chained: Promise<void> | undefined = this.appending ? this.appending.then(write) : write();
+    if (chained) {
+      const mine = (this.appending = chained.then(() => {
+        if (this.appending === mine) this.appending = null;
+      }));
+    }
+    return op;
   }
 
   /** Adds a list at `index` (default, or past the end: last). Returns its ID. */
@@ -358,11 +412,11 @@ export class SyncClient {
 
   /** Deletes with the tags this replica has observed (§3.2). */
   deleteCard(cardId: string): void {
-    this.submit({ type: "DELETE_CARD", card_id: cardId, observed_tags: this.viewBoard().liveTags("card", cardId) });
+    this.submit({ type: "DELETE_CARD", card_id: cardId, observed_tags: this.planBoard().liveTags("card", cardId) });
   }
 
   deleteList(listId: string): void {
-    this.submit({ type: "DELETE_LIST", list_id: listId, observed_tags: this.viewBoard().liveTags("list", listId) });
+    this.submit({ type: "DELETE_LIST", list_id: listId, observed_tags: this.planBoard().liveTags("list", listId) });
   }
 
   restoreCard(cardId: string): void {
@@ -376,6 +430,7 @@ export class SyncClient {
   /** Stops for good: no reconnects, no timers. Pending ops stay saved for the next open. */
   close(): void {
     if (this.queueDirty || this.confirmedDirty) this.saveNow();
+    (globalThis as { removeEventListener?: (t: string, f: () => void) => void }).removeEventListener?.("pagehide", this.onPageHide);
     this.status_ = "closed";
     this.clearTimers();
     const g = globalThis as { removeEventListener?: (t: string, f: () => void) => void };
@@ -469,7 +524,8 @@ export class SyncClient {
     this.deferred.clear(); // JOINED resends the whole queue in order
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
-    this.presence_.clear(); // stale once we are gone; JOINED brings the current set
+    this.connections.clear(); // stale once we are gone; JOINED brings the current set
+    this.presenceView = null;
     if (this.status_ === "closed" || this.status_ === "unauthorized") return;
     this.status_ = "offline";
     this.urlIndex++;
@@ -522,10 +578,12 @@ export class SyncClient {
         this.confirmedOp(m.op as Op, m.version as number, true);
         break;
       case "PRESENCE_UPDATE": {
-        // Several gateways may sweep the same board, so "left" can arrive more than once.
-        const user = m.user_id as string;
-        if (m.state === "left") this.presence_.delete(user);
-        else this.presence_.set(user, { cardId: (m.card_id as string | null) ?? null, state: m.state === "idle" ? "idle" : "active" });
+        // One entry per connection; "left" removes that connection only, and may arrive more
+        // than once (several gateways sweep the same board).
+        const conn = String(m.connection_id ?? m.user_id);
+        this.presenceView = null;
+        if (m.state === "left") this.connections.delete(conn);
+        else this.connections.set(conn, { userId: m.user_id as string, cardId: (m.card_id as string | null) ?? null, state: m.state === "idle" ? "idle" : "active" });
         break;
       }
       case "OP_ACK":
@@ -723,12 +781,29 @@ export class SyncClient {
     return this.viewCache;
   }
 
+  /** What the next edit is computed against: the view plus edits still being appended. */
+  private planBoard(): Board {
+    if (this.staged.length === 0) {
+      this.planCache = null;
+      return this.viewBoard();
+    }
+    if (!this.planCache) {
+      this.planCache = this.viewBoard().clone();
+      for (const op of this.staged) this.planCache.apply(op);
+    }
+    return this.planCache;
+  }
+
+  private planView(): View {
+    return this.staged.length === 0 ? this.view() : this.planBoard().view();
+  }
+
   private lists(): { id: string; position_key: string }[] {
-    return this.view().lists.filter((l) => l.id !== NIL) as { id: string; position_key: string }[];
+    return this.planView().lists.filter((l) => l.id !== NIL) as { id: string; position_key: string }[];
   }
 
   private cardsOf(listId: string): { id: string; position_key: string }[] {
-    const l = this.view().lists.find((x) => x.id === listId);
+    const l = this.planView().lists.find((x) => x.id === listId);
     return l ? [...l.cards] : [];
   }
 
@@ -776,16 +851,16 @@ export class SyncClient {
   }
 
   private changed(): void {
+    this.planCache = null; // the view under it may have changed
     this.checkMoves();
-    if (this.queueDirty) this.saveNow();
-    else if (this.confirmedDirty && !this.saveTimer) this.saveTimer = setTimeout(() => this.saveNow(), 1_000);
+    if ((this.queueDirty || this.confirmedDirty) && !this.saveTimer) this.saveTimer = setTimeout(() => this.saveNow(), 1_000);
     this.emit();
   }
 
   /**
-   * Saves everything now (§7.2 step 2 for edits); the confirmed encoding is reused if unchanged.
-   * One write at a time: changes made while one is in flight are written together, as the
-   * latest state, the moment it finishes, so a burst of edits reaches IndexedDB in two writes.
+   * Writes the snapshot now; the confirmed encoding is reused if unchanged. One write at a time:
+   * changes made while one is in flight are written together, as the latest state, the moment
+   * it finishes. The snapshot covers the log up to `durableUpTo`, which storage then drops.
    */
   private saveNow(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -804,6 +879,7 @@ export class SyncClient {
       version: this.version,
       pending: [...this.pending],
       unsent: [...this.unsent],
+      logUpTo: this.durableUpTo,
     };
     this.saveInFlight = true;
     this.saving = this.storage.save(state).catch((e) => this.log("save_failed", { error: String(e) })).then(() => {
@@ -816,8 +892,15 @@ export class SyncClient {
     });
   }
 
-  /** Resolves once everything changed so far is in storage. */
+  /** Resolves once every edit made so far is durable and shown (snapshots may still follow). */
   async saved(): Promise<void> {
+    while (this.appending) await this.appending;
+  }
+
+  /** Resolves once everything, snapshot included, is in storage. */
+  async flushed(): Promise<void> {
+    await this.saved();
+    this.saveNow();
     while (this.saveInFlight || this.saveAgain) await this.saving;
   }
 
@@ -843,6 +926,9 @@ export class SyncClient {
     this.version = s.version;
     this.pending = [...s.pending];
     this.unsent = [...s.unsent];
+    this.appendSeq = this.durableUpTo = s.logUpTo ?? 0;
+    // Edits appended after the snapshot carry later ticks than its HLC: never reuse one.
+    for (const op of this.pending) if (op.replica_id === this.replicaId) this.observe(op);
   }
 
   private clearTimers(): void {

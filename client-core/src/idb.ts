@@ -13,12 +13,17 @@
 //     adopt the same queue. Adopting moves that replica's pending ops and Unsent edits to the
 //     front of this tab's queue; writing this tab's record and deleting the adopted ones is one
 //     IndexedDB transaction, so a crash in between loses nothing and adopts nothing twice.
+//   - Two stores (amendment 21): `replicas`, one coalesced snapshot per replica, and `log`, the
+//     edits appended one by one before they are shown. A replica's state is its snapshot plus
+//     its log entries after `logUpTo`; a snapshot write removes the entries it contains.
 
 import { Board } from "@concord/crdt";
-import type { Saved, Storage } from "./storage.js";
+import type { Op } from "@concord/crdt";
+import { merge, type Saved, type Storage } from "./storage.js";
 
 const DB = "concord";
 const STORE = "replicas";
+const LOG = "log";
 
 interface Row {
   readonly key: string; // `${boardId}:${tabReplicaId}`
@@ -60,12 +65,22 @@ function done(tx: IDBTransaction): Promise<void> {
 }
 
 function openDb(): Promise<IDBDatabase> {
-  const r = indexedDB.open(DB, 1);
+  // Version 2 adds the append-only log of edits (amendment 21).
+  const r = indexedDB.open(DB, 2);
   r.onupgradeneeded = () => {
-    const s = r.result.createObjectStore(STORE, { keyPath: "key" });
-    s.createIndex("board", "boardId");
+    const db = r.result;
+    if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "key" }).createIndex("board", "boardId");
+    if (!db.objectStoreNames.contains(LOG)) db.createObjectStore(LOG, { keyPath: ["owner", "seq"] }).createIndex("board", "boardId");
   };
   return req(r);
+}
+
+interface LogEntry {
+  readonly owner: string; // the replica record's key
+  readonly boardId: string;
+  readonly tabReplicaId: string;
+  readonly seq: number;
+  readonly op: Op;
 }
 
 export class IndexedDbStorage implements Storage {
@@ -101,44 +116,67 @@ export class IndexedDbStorage implements Storage {
   }
 
   async load(): Promise<Saved | undefined> {
-    const rows = (await req(this.db.transaction(STORE).objectStore(STORE).index("board").getAll(this.boardId))) as Row[];
-    const own = rows.find((r) => r.tabReplicaId === this.replicaId);
-    const orphans: { row: Row; lock: { release: () => void } }[] = [];
-    for (const row of rows) {
-      if (row.tabReplicaId === this.replicaId) continue;
-      const lock = await tryLock(lockName(this.boardId, row.tabReplicaId));
-      if (lock) orphans.push({ row, lock }); // its tab is gone: ours now, and nobody else's
+    const tx0 = this.db.transaction([STORE, LOG]);
+    const rows = (await req(tx0.objectStore(STORE).index("board").getAll(this.boardId))) as Row[];
+    const logs = (await req(tx0.objectStore(LOG).index("board").getAll(this.boardId))) as LogEntry[];
+    const logOf = (tab: string) => logs.filter((e) => e.tabReplicaId === tab);
+    const rowOf = (tab: string) => rows.find((r) => r.tabReplicaId === tab);
+    // A tab closed before its first snapshot has only log entries, so look in both.
+    const tabs = new Set([...rows.map((r) => r.tabReplicaId), ...logs.map((e) => e.tabReplicaId)]);
+    const own = merge(rowOf(this.replicaId)?.saved, logOf(this.replicaId));
+    const orphans: { tab: string; state: Saved; lock: { release: () => void } }[] = [];
+    for (const tab of tabs) {
+      if (tab === this.replicaId) continue;
+      const lock = await tryLock(lockName(this.boardId, tab));
+      if (!lock) continue; // its tab is alive
+      const state = merge(rowOf(tab)?.saved, logOf(tab)); // its tab is gone: ours now, and nobody else's
+      if (state) orphans.push({ tab, state, lock });
+      else lock.release();
     }
     try {
-      if (orphans.length === 0) return own?.saved;
+      if (orphans.length === 0) return own;
       // The adopted queues go first, oldest tab's ops first; their ops keep their op_id, HLC
       // and replica ID, so a resend of an op that already committed is answered by dedup (§4.3).
-      orphans.sort((a, b) => firstPhysical(a.row.saved) - firstPhysical(b.row.saved));
-      const base = own?.saved ?? newest(orphans.map((o) => o.row.saved));
+      orphans.sort((a, b) => firstPhysical(a.state) - firstPhysical(b.state));
+      const base = own ?? newest(orphans.map((o) => o.state));
       const merged: Saved = {
         ...base,
-        replicaId: own?.saved.replicaId ?? this.replicaId,
-        hlc: own?.saved.hlc ?? { physical_ms: 0, counter: 0, replica_id: this.replicaId },
-        confirmed: base.confirmed,
-        version: base.version,
-        pending: [...orphans.flatMap((o) => o.row.saved.pending), ...(own?.saved.pending ?? [])],
-        unsent: [...orphans.flatMap((o) => o.row.saved.unsent), ...(own?.saved.unsent ?? [])],
+        replicaId: own?.replicaId ?? this.replicaId,
+        hlc: own?.hlc ?? { physical_ms: 0, counter: 0, replica_id: this.replicaId },
+        offsetMs: base.offsetMs,
+        pending: [...orphans.flatMap((o) => o.state.pending), ...(own?.pending ?? [])],
+        unsent: [...orphans.flatMap((o) => o.state.unsent), ...(own?.unsent ?? [])],
+        logUpTo: own?.logUpTo ?? 0,
       };
-      const tx = this.db.transaction(STORE, "readwrite");
-      const store = tx.objectStore(STORE);
-      store.put(this.row(merged));
-      for (const o of orphans) store.delete(o.row.key);
+      // One transaction: our merged record in, the adopted records and logs out.
+      const tx = this.db.transaction([STORE, LOG], "readwrite");
+      tx.objectStore(STORE).put(this.row(merged));
+      for (const o of orphans) {
+        tx.objectStore(STORE).delete(`${this.boardId}:${o.tab}`);
+        tx.objectStore(LOG).delete(IDBKeyRange.bound([`${this.boardId}:${o.tab}`, -Infinity], [`${this.boardId}:${o.tab}`, Infinity]));
+      }
       await done(tx);
-      this.adopted = orphans.map((o) => ({ replicaId: o.row.tabReplicaId, pending: o.row.saved.pending.length, unsent: o.row.saved.unsent.length }));
+      this.adopted = orphans.map((o) => ({ replicaId: o.tab, pending: o.state.pending.length, unsent: o.state.unsent.length }));
       return merged;
     } finally {
       for (const o of orphans) o.lock.release();
     }
   }
 
+  /** The snapshot, and the log entries it now contains removed, in one transaction. */
   async save(state: Saved): Promise<void> {
-    const tx = this.db.transaction(STORE, "readwrite");
+    const tx = this.db.transaction([STORE, LOG], "readwrite");
     tx.objectStore(STORE).put(this.row(state));
+    const owner = `${this.boardId}:${this.replicaId}`;
+    if (state.logUpTo) tx.objectStore(LOG).delete(IDBKeyRange.bound([owner, -Infinity], [owner, state.logUpTo]));
+    await done(tx);
+  }
+
+  /** One edit, durable before it is shown or sent (§7.2 step 2). Small and append-only. */
+  async append(op: Op, seq: number): Promise<void> {
+    const tx = this.db.transaction(LOG, "readwrite");
+    const entry: LogEntry = { owner: `${this.boardId}:${this.replicaId}`, boardId: this.boardId, tabReplicaId: this.replicaId, seq, op };
+    tx.objectStore(LOG).put(entry);
     await done(tx);
   }
 

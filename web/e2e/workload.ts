@@ -7,9 +7,9 @@ export interface Tally {
   [type: string]: number;
 }
 
-/** Makes `n` edits in the page; returns how many of each kind. */
+/** Makes `n` edits in the page and waits until they are durable and shown; returns how many of each kind. */
 export function randomEdits(page: Page, n: number, seed: number): Promise<Tally> {
-  return page.evaluate(([n, seed]) => {
+  return page.evaluate(async ([n, seed]) => {
     const c = window.concord!.client;
     let s = seed >>> 0;
     const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
@@ -54,6 +54,7 @@ export function randomEdits(page: Page, n: number, seed: number): Promise<Tally>
         count("move list");
       }
     }
+    await c.saved(); // each edit is in IndexedDB, then on screen (§7.2)
     return tally;
   }, [n, seed] as const);
 }
