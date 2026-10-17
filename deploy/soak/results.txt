@@ -44,3 +44,14 @@ meaning:
   - editing existing cards (titles, descriptions, labels, moves) costs ~0 once the cache is full;
   - each deleted card keeps ~3.0 KB of heap and 534 B of snapshot for the board's life (tombstone + registers, decision 9).
 projection: a board used daily for 30 days, assuming 500 ops a day of which 50 delete a card: 15,000 ops, 1,500 deleted cards -> heap while loaded 6.2 MB (ACK cache 1.6 MB, capped; deleted cards 4.5 MB), snapshot +0.80 MB. Live cards and edits to them add ~0. With amendment 26 only boards someone has open count against a Session instance's 384 MB heap.
+
+# Memory soak, run 2 (clean, production compose): notes while it runs
+- 13:02 UTC a first launch was stopped (TaskStop) and the stack reset with fresh volumes; on this
+  Windows machine stopping the task killed only its shell, and its vitest process kept running
+  against the new stack. Its users had been deleted with the volumes, so it got 401 for tickets and
+  its churn clients never joined; it wrote those errors into the same log file as run 2. It had
+  exited by 13:52 UTC (only run 2's processes were left). Run 2's own counter: errors 0 in every
+  sample. The verdict window (minute 60 on, from ~14:03 UTC) is after it was gone.
+- Found while reading this: a churn client that failed to join was never closed and kept retrying
+  for the rest of the run. Fixed in the harness (closed in finally; failing clients' last events
+  are now printed) for later runs; run 2 started before the fix.

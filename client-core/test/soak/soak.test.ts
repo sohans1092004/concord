@@ -75,9 +75,15 @@ async function ticketFor(session: string, gateway: number): Promise<string> {
   return r.json.ticket as string;
 }
 
-async function open(board: string, session: string, gateway: number): Promise<SyncClient> {
-  if (!PROD) return (await client(board, session, gateway)).c;
-  return SyncClient.open({ urls: WS, boardId: board, storage: new MemoryStorage(), ticket: () => ticketFor(session, 0) });
+/** `events` collects the client's own log (connects, drops, ticket failures) for error reports. */
+async function open(board: string, session: string, gateway: number, events: string[] = []): Promise<SyncClient> {
+  const log = (event: string, data: Record<string, unknown>) => {
+    const { board_id: _, ...rest } = data;
+    events.push(`${new Date().toISOString().slice(11, 23)} ${event} ${JSON.stringify(rest)}`.slice(0, 200));
+    if (events.length > 12) events.shift();
+  };
+  if (!PROD) return (await client(board, session, gateway, { log })).c;
+  return SyncClient.open({ urls: WS, boardId: board, storage: new MemoryStorage(), ticket: () => ticketFor(session, 0), log });
 }
 
 /**
@@ -198,8 +204,10 @@ describe.skipIf(!MINUTES)("memory soak", () => {
     // Connection churn, one at a time per board.
     for (const [i, b] of boards.entries()) loops.push((async () => {
       while (Date.now() < until) {
+        const events: string[] = [];
+        let opened: SyncClient | undefined;
         try {
-          const c = await open(b.board, b.users[rnd(b.users.length)]!.session, rnd(WS.length));
+          const c = (opened = await open(b.board, b.users[rnd(b.users.length)]!.session, rnd(WS.length), events));
           counts.connections++;
           await c.until(() => c.status === "joined", 30_000);
           const cards = c.view().lists.flatMap((l) => l.cards);
@@ -207,11 +215,12 @@ describe.skipIf(!MINUTES)("memory soak", () => {
           if (Math.random() < 0.5) edit(c);
           await sleep(3_000 + rnd(5_000));
           await c.saved();
-          c.close();
         } catch (err) {
           counts.errors++;
-          console.log(`soak error (churn): ${String(err)}`);
+          console.log(`soak error (churn) at ${new Date().toISOString()}: ${String(err)}; its last events: ${events.join(" | ")}`);
           await sleep(1_000);
+        } finally {
+          opened?.close(); // a client that failed to join must not keep retrying in the background
         }
         void i;
       }
