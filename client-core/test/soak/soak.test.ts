@@ -32,6 +32,7 @@ const ORIGIN = process.env.SOAK_ORIGIN ?? BASE;
 const PROJECT = process.env.SOAK_PROJECT ?? "concord-soak";
 const FIXED = (process.env.SOAK_WORKLOAD ?? "fixed") === "fixed";
 const EDIT_MS = Number(process.env.SOAK_EDIT_MS ?? (FIXED ? 500 : 3_000));
+const SAMPLE_MS = Number(process.env.SOAK_SAMPLE_S ?? 300) * 1000;
 const JVMS = PROD
   ? [`${PROJECT}-gateway-1`, `${PROJECT}-session1-1`, `${PROJECT}-session2-1`]
   : ["deploy-gateway1-1", "deploy-gateway2-1", "deploy-session1-1", "deploy-session2-1", "deploy-session3-1"];
@@ -243,7 +244,7 @@ describe.skipIf(!MINUTES)("memory soak", () => {
         appendFileSync(file, `${JSON.stringify(sample)}\n`);
         console.log(JSON.stringify(sample));
         if (Date.now() >= until) break;
-        await sleep(Math.min(300_000, Math.max(0, until - Date.now())));
+        await sleep(Math.min(SAMPLE_MS, Math.max(0, until - Date.now())));
       }
     })());
     await Promise.all(loops);

@@ -1,138 +1,195 @@
 # Concord runbook: from a fresh machine to the trial, and running it
 
-Everything here costs nothing: an Oracle Cloud **Always Free** Ampere (ARM64) VM, a free
-**DuckDNS** hostname, **Let's Encrypt** certificates via Caddy, and backups to **Backblaze B2**
-(free 10 GB) or **Oracle Object Storage** (Always Free 20 GB). Commands in `code` run on the VM
-unless marked **(laptop)**.
+The trial host is one **AWS EC2 t4g.small** in **ap-southeast-2 (Sydney)**, paid from the AWS
+free plan's credits:
+- 2 vCPU, 2 GB RAM, arm64, 30 GB gp3;
+- **Ubuntu 26.04 LTS**; the containers themselves stay on Ubuntu 24.04 (noble) and Alpine images;
+- Elastic IP **52.62.82.248**, hostname **concord-serve.duckdns.org** (DuckDNS, free);
+- certificates from Let's Encrypt via Caddy; backups to **Backblaze B2** (free 10 GB).
+
+Commands in `code` run on the VM unless marked **(laptop)**.
 
 Contents:
-1. [Create the VM](#1-create-the-vm)
-2. [Open ports 80 and 443](#2-open-ports-80-and-443)
-3. [The DuckDNS hostname](#3-the-duckdns-hostname)
-4. [Docker and the code](#4-docker-and-the-code)
-5. [The backup key and bucket](#5-the-backup-key-and-bucket)
+1. [Money: stay at zero spend](#1-money-stay-at-zero-spend)
+2. [The VM, its firewall and its address](#2-the-vm-its-firewall-and-its-address)
+3. [SSH from Windows](#3-ssh-from-windows)
+4. [Swap, Docker and the code](#4-swap-docker-and-the-code)
+5. [The backup key and the B2 bucket](#5-the-backup-key-and-the-b2-bucket)
 6. [Settings](#6-settings)
 7. [Start](#7-start)
 8. [Smoke test](#8-smoke-test)
 9. [Monitoring](#9-monitoring)
 10. [Day to day](#10-day-to-day)
-11. [If the machine dies](#11-if-the-machine-dies)
-12. [Adding Reliant later](#12-adding-reliant-later)
+11. [Memory on a 2 GB machine](#11-memory-on-a-2-gb-machine)
+12. [If the machine dies](#12-if-the-machine-dies)
+13. [Alternatives: Oracle, GCP](#13-alternatives-oracle-gcp)
+14. [Reliant](#14-reliant)
 
-## 1. Create the VM
+## 1. Money: stay at zero spend
 
-1. Sign in to cloud.oracle.com, then **Compute → Instances → Create instance**.
-2. **Image:** Canonical Ubuntu 24.04. **Shape:** Ampere `VM.Standard.A1.Flex` (Always Free eligible).
-   - Concord alone needs at most about 3 GB.
-   - Pick **2 OCPU and 12 GB**, so Reliant fits later (section 12). The Always Free limit is
-     4 OCPU and 24 GB in total.
-   - If Oracle says "out of capacity", try another availability domain, or try again later.
-3. **Networking:** keep the new VCN and public subnet, and **assign a public IPv4 address**.
-4. **SSH keys:** upload your public key (or let Oracle generate one and save it).
-5. **Boot volume:** the default 47 GB is plenty.
-6. Create. Note the **public IP**.
-7. Make the IP permanent, so DuckDNS never points at a stale address:
-   - open the instance's **Attached VNICs → the VNIC → IPv4 Addresses → Edit**;
-   - choose **Reserved public IP → Create new** (free).
-8. **(laptop)** `ssh ubuntu@<public IP>`
+The account is on AWS's **free plan**: it spends the sign-up credits ($100 here), and nothing
+can be charged to the card while it stays on that plan.
 
-## 2. Open ports 80 and 443
+- **Never upgrade to a paid plan.** The console offers it from time to time (Billing, the
+  account menu, and when credits run low). On the free plan, AWS stops or closes things
+  instead of charging. A paid plan would bill the card.
+- **The credits are finite: about $20 a month at this size.** That's your estimate covering the
+  instance, the 30 GB gp3 volume and the public IPv4 address (AWS bills every public IPv4,
+  including an attached Elastic IP). So $100 lasts about 5 months, well past the two-week trial.
+- **Check the balance.** In the console, open **Billing and Cost Management → Credits**: the
+  remaining amount and the expiry date. The console home's free plan widget shows the same, and
+  how many days the plan has left. Look once a week.
+- **Keep a zero-spend budget**, so an email arrives if anything ever costs real money:
+  1. Go to **Billing and Cost Management → Budgets → Create budget**.
+  2. Choose **Use a template → Zero spend budget**.
+  3. Enter your email and create it.
+- **Release Elastic IPs you are not using.** An Elastic IP costs credits whether or not it is
+  attached. Keep exactly one (52.62.82.248). If you ever replace the instance, move that one
+  (section 12) rather than allocating another. Release extras under **EC2 → Elastic IPs →
+  select → Actions → Release**.
+- **Delete what you stop using:** stopped instances still pay for their volume, and snapshots
+  cost per GB. At the end of the trial, see section 10's last row.
 
-Two firewalls must both allow them: Oracle's (outside the VM) and the VM's own. SSH (22) is
-already open; open nothing else.
+## 2. The VM, its firewall and its address
 
-**Oracle's security list:**
-1. Go to **Networking → Virtual cloud networks → your VCN → Security Lists → Default Security List**.
-2. **Add Ingress Rules**, twice:
-   - Source CIDR `0.0.0.0/0`, IP protocol TCP, destination port `80`, description "Caddy HTTP (Let's Encrypt)";
-   - Source CIDR `0.0.0.0/0`, IP protocol TCP, destination port `443`, description "Caddy HTTPS".
-3. Optional but good: change the existing port-22 rule's source from `0.0.0.0/0` to your
-   home IP followed by `/32`.
+Already done. Record it here so a rebuild matches:
 
-**The VM's own firewall.** Oracle's Ubuntu images ship iptables rules that reject everything but SSH:
-```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
-sudo iptables -L INPUT -n --line-numbers | head -12   # 80 and 443 ACCEPT, above the REJECT line
+1. **Instance:** EC2 → Launch instance.
+   - Name `concord`; image **Ubuntu Server 26.04 LTS (arm64)**; type **t4g.small**.
+   - Key pair `concord` (`.pem`, downloaded once).
+   - Storage **30 GB gp3**.
+2. **Security group** (EC2 → Security Groups → the instance's group → Inbound rules), exactly:
+
+   | Type | Port | Source | Why |
+   |---|---|---|---|
+   | SSH | 22 | **My IP** (your current address, `/32`) | only you |
+   | HTTP | 80 | `0.0.0.0/0` | Let's Encrypt's check and the redirect to HTTPS |
+   | HTTPS | 443 | `0.0.0.0/0` | the app |
+
+   - Outbound: the default (all), for Let's Encrypt, B2, image pulls and apt.
+   - If your home IP changes, SSH stops working: edit the SSH rule and choose **My IP** again.
+   - The VM itself has no firewall rules (Ubuntu's `ufw` is off on AWS images); leave it that way.
+3. **Elastic IP:**
+   - Go to **EC2 → Elastic IPs → Allocate**, then **Associate** it with the instance.
+   - It's 52.62.82.248: the address stays the same across stops, starts and reboots.
+4. **DuckDNS:**
+   - At https://www.duckdns.org, `concord-serve` → **52.62.82.248**.
+   - The IP is fixed, so no updater is needed.
+   - **(laptop)** Check it with `nslookup concord-serve.duckdns.org`, which must answer 52.62.82.248.
+
+**Where the testers are:** India. Sydney adds roughly 100–150 ms per round trip compared with a
+nearby region, so a tester's edit takes that much longer to reach the other screens. Measure it
+(section 8) and report it against the 200 ms target as it is. A miss caused by distance is a
+finding about the region, not a bug.
+
+## 3. SSH from Windows
+
+**(laptop)**, in PowerShell, once:
+
+```powershell
+icacls concord.pem /inheritance:r
+icacls concord.pem /grant:r "$($env:USERNAME):(R)"
 ```
 
-## 3. The DuckDNS hostname
+These give only you read access. OpenSSH refuses a key that others can read.
 
-1. Go to https://www.duckdns.org and sign in (GitHub or Google).
-2. Under **sub domain**, type `concord-<me>` and press **add domain**.
-3. In its **current ip** box, type the VM's public IP and press **update ip**.
-4. Copy your **token** from the top of the page; you need it for step 4.
-5. **(laptop)** Check it: `nslookup concord-<me>.duckdns.org` must answer with the VM's IP.
+Then, every time:
+```powershell
+ssh -i concord.pem ubuntu@52.62.82.248
+```
 
-The IP is reserved, so it should never change. In case it does, a cron line keeps DuckDNS
-current (step 4).
+## 4. Swap, Docker and the code
 
-## 4. Docker and the code
+**Swap (2 GB, a safety net only).** The stack is sized to fit in RAM (section 11). Swap only
+catches a short spike, such as a build, instead of letting the kernel kill a process:
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-concord.conf && sudo sysctl --system | grep swappiness
+free -m          # Swap: 2047 total
+```
+`vm.swappiness=10` keeps the kernel from swapping out memory that is in use; it swaps only under
+real pressure.
 
+**Docker, from Docker's own repository.** It supports Ubuntu 26.04 (`resolute`) on arm64: on
+2026-10-17 it listed `docker-ce` 29.9.1 and `docker-compose-plugin` 5.6.0 for
+`resolute/stable/binary-arm64`.
 ```bash
 sudo apt-get update && sudo apt-get -y upgrade
-curl -fsSL https://get.docker.com | sudo sh
+sudo apt-get install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo usermod -aG docker ubuntu && exit        # log out and in again, so the group applies
-docker run --rm hello-world                    # check
+```
+After logging back in:
+```bash
+docker run --rm hello-world && docker compose version     # "Hello from Docker!", then v5.x
+```
+**If** `apt-get update` says the Docker repository has no Release file for this release (it
+does today), use Ubuntu's own packages instead:
+`sudo apt-get install -y docker.io docker-compose-v2 docker-buildx`.
+
+**The code:**
+```bash
 git clone https://github.com/sohans1092004/concord.git ~/concord
-# Keep DuckDNS pointed at this VM (every 5 minutes; harmless when nothing changed):
-( crontab -l 2>/dev/null; echo '*/5 * * * * curl -fsS "https://www.duckdns.org/update?domains=concord-<me>&token=<token>&ip=" >/dev/null' ) | crontab -
 ```
 
-The images are built on the VM itself, so they come out ARM64. Every base image is multi-arch.
-
-## 5. The backup key and bucket
+## 5. The backup key and the B2 bucket
 
 **The age key** encrypts the backups. Only its *public* half goes on the VM.
-1. **(laptop)** Generate it, using the backup image so there's nothing to install. On the
-   VM, after step 7's build:
-   ```bash
-   docker run --rm --entrypoint age-keygen concord-backup:prod
+1. **(laptop)** With `age` installed (`winget install FiloSottile.age`):
+   ```powershell
+   age-keygen -o concord-backup.key
    ```
-   Or on the laptop, with `age` installed (`winget install FiloSottile.age`): `age-keygen -o concord-backup.key`.
-2. It prints a private key (`AGE-SECRET-KEY-1…`) and a public key (`age1…`).
-   - **Save the private key** in your password manager, plus one offline copy. Without it no
-     backup can be restored.
-   - If you generated it on the VM, do not leave it there.
+   It writes a private key (`AGE-SECRET-KEY-1…`) to the file and prints the public key (`age1…`).
+2. **Save the private key** in your password manager, plus one offline copy. Without it no
+   backup can be restored. It never goes on the VM.
 3. The public key is `AGE_RECIPIENT` in step 6.
 
-**The bucket. Choose one.**
-
-**(a) Backblaze B2.** The free 10 GB says it needs no card; if sign-up asks for one, use (b).
-1. Sign up at https://www.backblaze.com/sign-up/cloud-storage.
+**Backblaze B2:**
+1. Sign up at https://www.backblaze.com/sign-up/cloud-storage. The free 10 GB says it needs no
+   card; if it asks for one, stop and tell me.
 2. Go to **B2 Cloud Storage → Buckets → Create a Bucket**:
-   - name `concord-backups-<me>`;
+   - name `concord-backups-serve` (bucket names are global; add a suffix if it's taken);
    - Files: **Private**;
    - encryption: off (the backups are already encrypted);
    - object lock: off.
 3. Set the bucket's **Lifecycle Settings** to **Keep only the last version of the file**.
 4. Go to **Application Keys → Add a New Application Key**:
    - name `concord-vm`;
-   - allow access to the bucket `concord-backups-<me>` only;
-   - type **Read and Write**.
-5. Copy the **keyID** and **applicationKey**. The key is shown only once.
-
-**(b) Oracle Object Storage.**
-1. Go to **Storage → Buckets → Create Bucket**: name `concord-backups`, Standard tier, private.
-2. Find your **namespace** under **Profile → Tenancy**, and note the region (e.g. `ap-mumbai-1`).
-3. Go to **Profile → My profile → Customer secret keys → Generate secret key**, named
-   `concord-backup`. Copy the secret (shown once) and the **Access key**.
-4. The bucket is in the same account as the VM, so also keep a copy on your laptop, weekly,
-   with `deploy/prod/pull-backups.sh` (see its header for setup).
+   - access to that bucket only;
+   - **Read and Write**.
+5. Copy the **keyID** and the **applicationKey**. The key is shown only once.
 
 ## 6. Settings
 
 ```bash
 cd ~/concord/deploy/prod
-./gen-env.sh concord-<me>.duckdns.org you@example.com    # writes .env with fresh random secrets
+./gen-env.sh concord-serve.duckdns.org you@example.com    # writes .env with fresh random secrets
 nano .env
 ```
 
 In `.env`:
 1. Set `AGE_RECIPIENT=age1…`, the public key from step 5.
-2. Uncomment and fill **one** storage block, (a) B2 or (b) Oracle, following the comments.
-   Delete the two `CHANGE_ME` lines.
+2. Under "(a) Backblaze B2", remove the `#   ` from its four lines and fill them in:
+   ```
+   RCLONE_CONFIG_REMOTE_TYPE=b2
+   RCLONE_CONFIG_REMOTE_ACCOUNT=<keyID>
+   RCLONE_CONFIG_REMOTE_KEY=<applicationKey>
+   BACKUP_REMOTE=REMOTE:concord-backups-serve/concord
+   ```
+   Then delete the two lines that still say `CHANGE_ME` (`RCLONE_CONFIG_REMOTE_TYPE=CHANGE_ME`,
+   `BACKUP_REMOTE=CHANGE_ME`). Leave the (b) Oracle lines commented.
 3. Optional: set `BACKUP_PING_URL`.
    - Create a free check at https://healthchecks.io, period 1 day, grace 2 hours.
    - Paste its ping URL. It emails you if a night's backup never arrives.
@@ -143,13 +200,19 @@ development value (`Config.checkPublic`).
 
 ## 7. Start
 
+The first build compiles the server and the web app on the VM, which takes several minutes.
+- It needs up to about 1.1 GB: 1,072 MiB measured for a no-cache build of both images on a
+  laptop, where Gradle runs more workers than on 2 vCPUs.
+- That fits only because nothing else is running yet. Build before starting the stack, as below.
 ```bash
 cd ~/concord/deploy/prod
-docker compose up -d --build --wait      # the first build takes several minutes on ARM
-docker compose ps                         # every service "healthy" or "running"; migrate "exited (0)"
-docker compose logs caddy | grep -i certificate   # "certificate obtained successfully"
-curl -fsS https://concord-<me>.duckdns.org/healthz   # ok
-docker compose exec backup /app/backup/backup.sh     # a first backup now; prints backup_done
+docker compose build                       # several minutes; the images come out arm64
+docker compose up -d --wait
+docker compose ps                          # every service "healthy" or "running"; migrate "exited (0)"
+docker compose logs caddy | grep -i "certificate obtained"
+curl -fsS https://concord-serve.duckdns.org/healthz && echo    # ok
+docker compose exec backup /app/backup/backup.sh               # a first backup now; prints backup_done
+free -m && docker stats --no-stream        # compare with section 11
 ```
 
 Then prove the backup restores. **(laptop)**, from a clone with the same `.env` copied over:
@@ -165,23 +228,25 @@ The **invite code** for testers is `CONCORD_INVITE_CODE` in `.env`.
 **(laptop)**, from a clone of the repository:
 ```bash
 cd concord/client-core && npm ci
-SMOKE_URL=https://concord-<me>.duckdns.org SMOKE_INVITE=<invite code> npx vitest run test/smoke
+SMOKE_URL=https://concord-serve.duckdns.org SMOKE_INVITE=<invite code> npx vitest run test/smoke
 ```
 
 It checks the following, all through the public URL:
 - `/healthz` answers;
 - the security headers and the CSP are present;
 - sign-up without the invite code is refused;
-- two users with the code edit one board at once over `wss://` and converge on the same state hash.
+- two users with the code edit one board at once over `wss://` and converge on the same state hash;
+- the time from one client's edit to the other client seeing it (p50, p95), to report against
+  the 200 ms target.
 
 Afterwards it deletes both test accounts, and with them the board. It ends with
-`smoke: …, both on <hash>…` and `1 passed`.
+`smoke: …, both on <hash>…` and `1 passed`. Run it from India for the latency the testers will see.
 
 ## 9. Monitoring
 
 - **Uptime, by email (free):**
   1. Sign up at https://uptimerobot.com, then **Add New Monitor**.
-  2. Type **HTTP(s)**, URL `https://concord-<me>.duckdns.org/healthz`, interval 5 minutes.
+  2. Type **HTTP(s)**, URL `https://concord-serve.duckdns.org/healthz`, interval 5 minutes.
   3. Alert contact: your email.
 
   `/healthz` fails if the gateway is down, if Postgres doesn't answer, or if less than 10% of
@@ -191,16 +256,17 @@ Afterwards it deletes both test accounts, and with them the board. It ends with
   container and per JVM heap, disk, and the last backup.
   ```bash
   ~/concord/deploy/prod/summary.sh                       # now
-  ( crontab -l; echo '0 7 * * * ~/concord/deploy/prod/summary.sh >> ~/concord-summary.log 2>&1' ) | crontab -
+  ( crontab -l 2>/dev/null; echo '0 7 * * * ~/concord/deploy/prod/summary.sh >> ~/concord-summary.log 2>&1' ) | crontab -
   ```
+- **Money:** the zero-spend budget's emails, and the weekly look at **Credits** (section 1).
 
 ## 10. Day to day
 
 | Task | How |
 |---|---|
-| Deploy a new version | `cd ~/concord && git pull && deploy/prod/deploy.sh`: backup, migrations, then the Session instances one at a time and the gateway; clients reconnect on their own and lose nothing |
+| Deploy a new version | **Not settled yet: don't run `deploy.sh` on this VM.** It builds while the stack keeps serving: 1,072 MiB of build next to ~650 MiB of running services pushes a 2 GB machine into swap. Until a deploy method is chosen (images built in CI, or a short planned stop), ask before deploying |
 | Logs | `cd ~/concord/deploy/prod && docker compose logs -f --since 1h gateway` (JSON lines; also `session1`, `session2`, `caddy`, `backup`). Docker keeps 5 × 10 MB per container |
-| Memory | `docker stats --no-stream`; per JVM: `docker compose exec gateway jcmd 1 GC.heap_info` (also `session1`, `session2`). Limits: gateway 512 MB (heap 256 MB), each Session 640 MB (heap 384 MB), Postgres 384 MB, Redis 96 MB, Caddy 96 MB, backup 384 MB. `free -m` should show plenty available |
+| Memory | `free -m`, `docker stats --no-stream`, and per JVM `docker compose exec gateway jcmd 1 GC.heap_info` (also `session1`, `session2`). Limits and what is normal: section 11 |
 | A backup now | `docker compose exec backup /app/backup/backup.sh` |
 | Check a backup restores | **(laptop)** `deploy/prod/restore.sh <age key> latest`: throwaway Postgres, row counts and every board's hash checked. Do it weekly |
 | Read bug reports | `docker compose exec -T postgres psql -U concord -d concord -c "SELECT created_at, (SELECT email FROM users u WHERE u.id = r.user_id), description FROM bug_reports r ORDER BY created_at DESC LIMIT 20"`; full diagnostics: `... -c "SELECT diagnostics FROM bug_reports WHERE id = '<id>'"` |
@@ -208,37 +274,88 @@ Afterwards it deletes both test accounts, and with them the board. It ends with
 | Restart one service | `docker compose restart session1`. A Session instance hands its boards over gracefully |
 | Change a setting | edit `.env`, then `docker compose up -d --wait` |
 | Disk | `df -h /`; `docker system prune -f` removes old images after deploys |
+| End of the trial | delete the data (`docker compose down -v`), then **terminate** the instance (EC2 → Instances → Terminate; its volume goes with it), **release** the Elastic IP, delete any snapshots, and delete the B2 bucket within 14 days |
 
-## 11. If the machine dies
+## 11. Memory on a 2 GB machine
+
+`deploy/prod/compose.yaml` gives every container a hard limit, and every JVM a capped heap,
+metaspace, code cache and direct memory:
+
+| Container | Limit | JVM |
+|---|---|---|
+| gateway | 320 MiB | heap 128 MiB (its threads, metaspace and buffers need the rest) |
+| session1, session2 | 304 MiB each | heap 160 MiB |
+| postgres | 224 MiB | shared_buffers 48 MB |
+| redis | 40 MiB | |
+| caddy | 56 MiB | |
+| backup | 160 MiB | heap 80 MiB, only while dumping |
+| **Total** | **1,408 MiB** | about 74% of the ~1.9 GiB the kernel reports, so at least 25% headroom even if every container sat at its limit |
+| migrate | 128 MiB | only for seconds, during a deploy |
+
+- **Normal:** measured use, and the soak with these exact limits, are in
+  `deploy/soak/results.txt`. Each container should sit well under its limit.
+- **When a container hits its limit,** the kernel kills it and Docker restarts it. The
+  `restarts` count then goes up:
+  ```bash
+  docker inspect -f '{{.Name}} oomkilled={{.State.OOMKilled}} restarts={{.RestartCount}}' $(docker compose ps -aq)
+  ```
+  Tell me if it happens; the limits are not to be raised blindly.
+- **Swap in use** (`free -m`) means something spiked. A little after a build is fine. Steady
+  swap use during the trial is not.
+- **Measured** (`deploy/soak/results.txt`, run 3, these exact limits, 36 minutes, 0 OOM kills):
+
+  | | Exact peak (incl. reclaimable cache) | Anonymous memory |
+  |---|---|---|
+  | gateway | 260 MiB | 218 MiB |
+  | session1 | 171 MiB | 141 MiB |
+  | session2 | 195 MiB | 165 MiB |
+  | postgres | 224 MiB, its file cache filling the limit; reclaimed, never killed | 18 MiB |
+  | backup, during a dump | 91 MiB | |
+  | migrate | 58 MiB | |
+
+## 12. If the machine dies
 
 What you need is all off the machine: the code (GitHub), `.env` (your password manager), the
-backups (the bucket, and the laptop copies), and the age private key (your password manager).
+backups (B2), and the age private key (your password manager).
 
-1. Create a new VM: sections 1 and 2. Keep the reserved IP if you can (move it to the new VM's
-   VNIC); otherwise point DuckDNS at the new IP (section 3).
-2. Install Docker and clone the code (section 4).
-3. Put `.env` back in `~/concord/deploy/prod/` (from your password manager).
-4. Build, start the database, restore the latest backup into it, verified, then start everything:
+1. Launch a new instance like section 2 (same security group).
+2. **Move the Elastic IP:** EC2 → Elastic IPs → 52.62.82.248 → **Disassociate**, then
+   **Associate** it with the new instance. DuckDNS needs no change. Don't allocate a second one.
+3. Do sections 3–4 on it, then put `.env` back in `~/concord/deploy/prod/`.
+4. Build, restore the latest backup into the new database, verified, then start everything:
    ```bash
    cd ~/concord/deploy/prod
    docker compose build
-   scp you@laptop:concord-backup.key /tmp/k   # or paste it into /tmp/k; delete it afterwards
-   ./restore.sh /tmp/k latest --into-prod     # asks you to type the board count, verifies, starts
+   nano /tmp/k                                 # paste the age private key; deleted below
+   ./restore.sh /tmp/k latest --into-prod      # asks you to type the board count, verifies, starts
    shred -u /tmp/k
    ```
-5. Check: `curl https://concord-<me>.duckdns.org/healthz`, then run the smoke test (section 8).
+5. Check `curl https://concord-serve.duckdns.org/healthz`, then run the smoke test (section 8).
+6. Terminate the dead instance, so its volume stops costing credits.
 
 Edits made after the last backup are still in testers' browsers (IndexedDB). They are resent
 when the browsers reconnect, so they come back too, as long as testers reopen the board in the
 same browser.
 
-## 12. Adding Reliant later
+## 13. Alternatives: Oracle, GCP
 
-DuckDNS allows 5 subdomains: add `reliant-<me>` with the same IP.
-- **Caddy:** add a site block for `reliant-<me>.duckdns.org` to `deploy/prod/Caddyfile`, proxying
-  to Reliant's dashboard on a shared Docker network.
-- **Reliant's own deploy:** drop its Caddy and use this one.
-- **Memory:** Concord's limits add up to about 2.8 GB. On a 12 GB VM that leaves about 9 GB
-  for Reliant and the OS; Reliant's README suggests 4 GB for a demo.
+If AWS ever stops being free for this, the same stack runs elsewhere. The steps change only in
+sections 2–4.
+- **Oracle Cloud Always Free:**
+  - An Ampere A1 VM (arm64, up to 4 OCPU and 24 GB in total), free indefinitely, with a reserved
+    public IP.
+  - Open 80 and 443 twice: in the VCN's security list, and in the image's own iptables rules
+    (Oracle's Ubuntu images reject everything but SSH; add two `ACCEPT` rules, then
+    `netfilter-persistent save`).
+  - Capacity is often short in popular regions.
+- **Google Cloud free tier:**
+  - One e2-micro (x86, 1 GB RAM) in some US regions.
+  - Too small for this stack without cutting it to one Session instance; the new-account trial
+    credits run out.
 
-Not built yet.
+## 14. Reliant
+
+The earlier plan was Reliant on the same VM behind the same Caddy, at `reliant-<me>.duckdns.org`.
+On a 2 GB t4g.small that is **not possible**: Concord's limits take 1,408 MiB of about 1.9 GiB,
+and Reliant needs more than what is left. Reliant needs its own instance, a larger one (which
+costs credits faster), or the Oracle option above.

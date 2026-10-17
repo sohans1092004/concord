@@ -69,3 +69,24 @@ concord-soak-session2-1      12.4      15.7      14.3     14.2     15.7       -0
 load: {'edits': 118863, 'connections': 5343, 'slow': 62, 'errors': 0}
 
 RESULT: PASSED. Heap after a full GC flat across the second hour on every JVM; 0 errors. Each board's ACK cache filled (10,000 ops) at about minute 44, inside the first hour.
+
+# Memory soak, run 3: the 2 GB budget (AWS t4g.small), 2026-10-17 18:45:47-19:23:11 UTC
+command: production compose with the t4g.small limits (deploy/prod/compose.yaml) + deploy/soak/compose.soak.yaml; SOAK_TARGET=prod SOAK_MINUTES=36 SOAK_EDIT_MS=200 SOAK_SAMPLE_S=120 npx vitest run test/soak; python deploy/soak/verdict.py deploy/soak/2026-10-17T18-45-47-575Z.jsonl 20
+fast editors so every board's ACK cache is full by minute ~17; verdict over minute 20 on
+a first attempt at 18:40 was stopped after 4 minutes: the gateway, then limited to 288 MiB, had reached 243 MiB (84%); it got 320 and each session 304 (same 1,408 MiB total)
+
+19 samples, minutes 0..36; window (minute 20 on): 9 samples
+JVM                     first MB  h2 start    h2 end   h2 min   h2 max  slope MB/h   limit  verdict
+concord-soak-gateway-1      18.1      15.6      15.5     15.3     16.1       -1.01     2.0  flat
+concord-soak-session1-1      12.8      12.8      12.6     12.5     13.2       -1.25     2.0  flat
+concord-soak-session2-1      13.0      16.8      16.6     15.7     17.1       -1.28     2.0  flat
+load: {'edits': 81847, 'connections': 1549, 'slow': 18, 'errors': 0}
+
+exact peaks (cgroup memory.peak; includes reclaimable file cache) and anonymous memory at the end, MiB:
+  gateway 260.2 / anon 218.3 of 320 | session1 170.6 / 141.2 of 304 | session2 195.1 / 165.4 of 304 | postgres 224.0 / 18.1 of 224 (its cache fills the limit and is reclaimed; never killed) | redis 10.2 / 3.2 of 40 | caddy 28.5 / 20.2 of 56 | backup 91.1 (during a dump of 33,775 ops) of 160 | migrate 57.7 of 128
+OOM kills: 0 (docker events, State.OOMKilled), restarts 0 on every container; errors 0; backup dump and migrate ran inside their limits at minute 15
+RESULT: PASSED, fits 1,408 MiB of limits (74% of ~1.9 GiB)
+
+# Build memory, 2026-10-17 19:24-19:27 UTC
+command: docker build --no-cache -f server/Dockerfile --target backup . (both stages: Gradle and the web build), sampling the Docker VM's MemAvailable every 1s
+result: 2m21s; MemAvailable from 5,385 MiB down to 4,312 MiB: the build took up to 1,072 MiB (laptop: more cores, so more Gradle workers than a 2 vCPU VM)

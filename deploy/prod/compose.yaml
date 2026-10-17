@@ -6,7 +6,14 @@
 # headers, and the one way in. Postgres, Redis, the Session instances and the gateway stay on
 # the internal network. Two Session instances, so a board's owner can fail over (SPEC §2.4).
 #
-# Memory: every JVM has an explicit heap and every container a limit (docs/runbook.md, "Memory").
+# Memory: sized for a 2 GB VM (AWS t4g.small; MemTotal about 1,900 MiB). Container limits, steady:
+#   gateway 320 + session1 304 + session2 304 + postgres 224 + redis 40 + caddy 56 + backup 160
+#   = 1,408 MiB, 74% of 1,900: 26% headroom even if every container sat at its limit. migrate
+#   (128) runs only during a deploy: 1,536 MiB for those seconds. Measured use was ~584 MiB
+#   (Phase 4a soak). JVMs: Serial GC, capped heap, metaspace, code cache and direct memory;
+#   MALLOC_ARENA_MAX=2 keeps glibc from growing native arenas per thread. The gateway has more
+#   room than its heap suggests: its native memory (threads, metaspace, buffers) peaked at 243 MiB
+#   in a laptop soak with a 288 limit, so it gets 320 and each Session 304.
 
 x-logging: &logging
   logging:
@@ -30,12 +37,13 @@ x-env: &env
   CONCORD_DB_POOL: "8"
   CONCORD_REDIS_URL: redis://redis:6379
   CONCORD_INTERNAL_SECRET: ${CONCORD_INTERNAL_SECRET:?run gen-env.sh}
+  MALLOC_ARENA_MAX: "2"
 
 x-session: &session
   <<: *server
   command: ["/app/session/bin/session"]
   stop_grace_period: 20s # graceful handover: flush, snapshot, release (SPEC §2.4)
-  mem_limit: 640m
+  mem_limit: 304m
   depends_on:
     migrate: { condition: service_completed_successfully }
     redis: { condition: service_healthy }
@@ -49,8 +57,9 @@ services:
     <<: *logging
     image: postgres:16-alpine
     restart: unless-stopped
-    mem_limit: 384m
-    command: ["postgres", "-c", "shared_buffers=96MB", "-c", "max_connections=60"]
+    mem_limit: 224m
+    # Pools: gateway 8 + 2 sessions x 8 + backup 2 + migrate = 27 at most.
+    command: ["postgres", "-c", "shared_buffers=48MB", "-c", "max_connections=40"]
     environment:
       POSTGRES_DB: concord
       POSTGRES_USER: concord
@@ -65,10 +74,10 @@ services:
     <<: *logging
     image: redis:7-alpine
     restart: unless-stopped
-    mem_limit: 96m
+    mem_limit: 40m
     # Leases, fence counters, fan-out and presence: all rebuildable from Postgres (SPEC §5.2),
     # so no persistence. noeviction: a lease must never be evicted to make room.
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "24mb", "--maxmemory-policy", "noeviction"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -78,10 +87,10 @@ services:
     <<: *server
     restart: "no"
     command: ["java", "-cp", "/app/session/lib/*", "dev.concord.common.Migrate"]
-    mem_limit: 256m
+    mem_limit: 128m
     environment:
       <<: *env
-      JAVA_OPTS: "-Xmx128m"
+      JAVA_OPTS: "-XX:+UseSerialGC -Xmx64m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m"
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -91,20 +100,20 @@ services:
       <<: *env
       CONCORD_INSTANCE_ID: session1
       CONCORD_ADVERTISE: ws://session1:7000/internal
-      JAVA_OPTS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m"
+      JAVA_OPTS: "-XX:+UseSerialGC -Xms32m -Xmx160m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=32m"
   session2:
     <<: *session
     environment:
       <<: *env
       CONCORD_INSTANCE_ID: session2
       CONCORD_ADVERTISE: ws://session2:7000/internal
-      JAVA_OPTS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m"
+      JAVA_OPTS: "-XX:+UseSerialGC -Xms32m -Xmx160m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=32m"
 
   gateway:
     <<: *server
     command: ["/app/gateway/bin/gateway"]
     stop_grace_period: 15s # RECONNECT_ELSEWHERE to every client, then stop (SPEC §8 row 15)
-    mem_limit: 512m
+    mem_limit: 320m
     environment:
       <<: *env
       CONCORD_PORT: "8080"
@@ -113,7 +122,7 @@ services:
       CONCORD_ALLOWED_ORIGINS: https://${CONCORD_DOMAIN}
       CONCORD_INVITE_CODE: ${CONCORD_INVITE_CODE:?run gen-env.sh}
       CONCORD_TRUSTED_PROXY: caddy
-      JAVA_OPTS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m"
+      JAVA_OPTS: "-XX:+UseSerialGC -Xms32m -Xmx128m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=32m"
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -126,7 +135,7 @@ services:
     <<: *logging
     image: caddy:2.8.4-alpine
     restart: unless-stopped
-    mem_limit: 96m
+    mem_limit: 56m
     ports: ["80:80", "443:443"]
     environment:
       CADDY_SITE: ${CONCORD_DOMAIN} # the rehearsal sets ":80": the tunnel does the TLS
@@ -147,10 +156,11 @@ services:
       dockerfile: server/Dockerfile
       target: backup
     command: ["/app/backup/schedule.sh"]
-    mem_limit: 384m
+    mem_limit: 160m
     environment:
       <<: *env
-      JAVA_OPTS: "-Xmx192m"
+      CONCORD_DB_POOL: "2"
+      JAVA_OPTS: "-XX:+UseSerialGC -Xmx80m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m"
       AGE_RECIPIENT: ${AGE_RECIPIENT:?run gen-env.sh}
       BACKUP_REMOTE: ${BACKUP_REMOTE:?run gen-env.sh}
       BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-3}

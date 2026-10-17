@@ -2,7 +2,8 @@
 //   cd client-core && SMOKE_URL=https://concord-<me>.duckdns.org SMOKE_INVITE=<code> npx vitest run test/smoke
 // Signs up two users with the invite code, one creates a board and adds the other, two headless
 // clients edit it at once over wss:// and must converge on the same state hash; the security
-// headers and /healthz are checked; then both accounts are deleted (which deletes the board).
+// headers and /healthz are checked, and the sync latency is printed (p50/p95 against the 200 ms
+// target); then both accounts are deleted (which deletes the board).
 //
 // SMOKE_LIVE_SECONDS=N adds the deploy-under-load check: three clients edit one board for N
 // seconds while you run deploy/prod/deploy.sh (or restart anything); afterwards every op any
@@ -13,6 +14,8 @@ import { prng, randomEdit } from "../e2e/workload.js";
 
 const URL_ = process.env.SMOKE_URL?.replace(/\/$/, "");
 const INVITE = process.env.SMOKE_INVITE ?? "";
+// The Origin the gateway allows; the URL itself unless testing a local stack behind its public name.
+const ORIGIN = process.env.SMOKE_ORIGIN ?? URL_;
 const PASSWORD = "smoke test password, deleted at the end";
 
 interface Account {
@@ -25,7 +28,7 @@ async function api(path: string, init: { method?: string; body?: unknown; sessio
   const r = await fetch(`${URL_}${path}`, {
     method: init.method ?? "GET",
     headers: {
-      Origin: URL_!,
+      Origin: ORIGIN!,
       ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(init.session ? { Authorization: `Bearer ${init.session}` } : {}),
     },
@@ -38,7 +41,7 @@ async function api(path: string, init: { method?: string; body?: unknown; sessio
 async function signUp(name: string): Promise<Account> {
   const email = `smoke-${crypto.randomUUID().slice(0, 8)}@smoke.invalid`;
   const r = await fetch(`${URL_}/api/auth/sign-up`, {
-    method: "POST", headers: { Origin: URL_!, "Content-Type": "application/json" },
+    method: "POST", headers: { Origin: ORIGIN!, "Content-Type": "application/json" },
     body: JSON.stringify({ email, name, password: PASSWORD, invite_code: INVITE }),
   });
   expect(r.status, await r.clone().text()).toBe(201);
@@ -82,7 +85,7 @@ describe.skipIf(!URL_)("smoke test against a live deployment", () => {
     expect(await page.text()).toContain('<div id="root">');
     // Without the invite code, sign-up is refused.
     const noInvite = await fetch(`${URL_}/api/auth/sign-up`, {
-      method: "POST", headers: { Origin: URL_!, "Content-Type": "application/json" },
+      method: "POST", headers: { Origin: ORIGIN!, "Content-Type": "application/json" },
       body: JSON.stringify({ email: `smoke-x-${Date.now()}@smoke.invalid`, name: "x", password: PASSWORD }),
     });
     expect(noInvite.status).toBe(403);
@@ -115,6 +118,24 @@ describe.skipIf(!URL_)("smoke test against a live deployment", () => {
       expect(clients[0]!.unsentEdits()).toHaveLength(0);
       expect(clients[1]!.unsentEdits()).toHaveLength(0);
       console.log(`smoke: ${URL_}, board version ${clients[0]!.confirmedVersion}, both on ${ha!.slice(0, 12)}…, ${Date.now() - started}ms`);
+
+      // Sync latency, against the 200 ms target (SPEC §10): one client renames a card, timed until
+      // the other client shows it (through the server, both ways over the internet). Recorded,
+      // not asserted: from a distant region the round trip alone can exceed the target.
+      const card = clients[0]!.view().lists.find((l) => l.id === list)!.cards[0]!.id;
+      const seen = (v: string) => clients[1]!.view().lists.some((l) => l.cards.some((c) => c.id === card && (c as { title?: unknown }).title === v));
+      const ms: number[] = [];
+      for (let i = 0; i < 30; i++) {
+        const v = `latency ${i}`;
+        const t0 = performance.now();
+        clients[0]!.setField(card, "title", v);
+        await clients[1]!.until(() => seen(v), 10_000);
+        ms.push(performance.now() - t0);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      ms.sort((x, y) => x - y);
+      const q = (f: number) => ms[Math.min(ms.length - 1, Math.floor(f * ms.length))]!.toFixed(0);
+      console.log(`latency: edit on one client until the other shows it, n=${ms.length}: p50 ${q(0.5)} ms, p95 ${q(0.95)} ms, max ${ms[ms.length - 1]!.toFixed(0)} ms; target 200 ms: ${Number(q(0.95)) <= 200 ? "met" : "missed"} at p95`);
     } finally {
       for (const c of clients) c.close();
       // Clean up: B leaves, then A's deletion removes the now single-member board.
