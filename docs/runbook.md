@@ -5,7 +5,10 @@ free plan's credits:
 - 2 vCPU, 2 GB RAM, arm64, 30 GB gp3;
 - **Ubuntu 26.04 LTS**; the containers themselves stay on Ubuntu 24.04 (noble) and Alpine images;
 - Elastic IP **52.62.82.248**, hostname **concord-serve.duckdns.org** (DuckDNS, free);
-- certificates from Let's Encrypt via Caddy; backups to **Backblaze B2** (free 10 GB).
+- certificates from Let's Encrypt via Caddy; backups to **Backblaze B2** (free 10 GB);
+- **the VM never builds anything.** CI builds the images for every commit on `main`, after all
+  tests pass, and publishes them as `ghcr.io/sohans1092004/concord-server` and `concord-backup`,
+  tagged with the commit SHA. The VM pulls the SHA that `.env` pins (`CONCORD_TAG`).
 
 Commands in `code` run on the VM unless marked **(laptop)**.
 
@@ -101,7 +104,7 @@ ssh -i concord.pem ubuntu@52.62.82.248
 ## 4. Swap, Docker and the code
 
 **Swap (2 GB, a safety net only).** The stack is sized to fit in RAM (section 11). Swap only
-catches a short spike, such as a build, instead of letting the kernel kill a process:
+catches a short spike instead of letting the kernel kill a process:
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
@@ -139,7 +142,8 @@ docker run --rm hello-world && docker compose version     # "Hello from Docker!"
 does today), use Ubuntu's own packages instead:
 `sudo apt-get install -y docker.io docker-compose-v2 docker-buildx`.
 
-**The code:**
+**The code:** the VM needs only the compose files and scripts from it; the programs come as
+images.
 ```bash
 git clone https://github.com/sohans1092004/concord.git ~/concord
 ```
@@ -194,19 +198,20 @@ In `.env`:
    - Create a free check at https://healthchecks.io, period 1 day, grace 2 hours.
    - Paste its ping URL. It emails you if a night's backup never arrives.
 
+**The version** is `CONCORD_TAG` in `.env`: `gen-env.sh` sets it to the commit you cloned.
+- That commit's images exist once its CI run on GitHub (**Actions → ci**) is green, including
+  the two "publish images" jobs. That takes about 15 minutes after a push.
+- **To use another version,** put that commit's full 40-character SHA there. Never `latest`.
+
 **Keep a copy of `.env` in your password manager.** It holds the database password and the
 invite code. `.env` is never committed (`.gitignore`), and production refuses to start with any
 development value (`Config.checkPublic`).
 
 ## 7. Start
 
-The first build compiles the server and the web app on the VM, which takes several minutes.
-- It needs up to about 1.1 GB: 1,072 MiB measured for a no-cache build of both images on a
-  laptop, where Gradle runs more workers than on 2 vCPUs.
-- That fits only because nothing else is running yet. Build before starting the stack, as below.
 ```bash
 cd ~/concord/deploy/prod
-docker compose build                       # several minutes; the images come out arm64
+docker compose pull                        # the arm64 images for CONCORD_TAG; a minute or two
 docker compose up -d --wait
 docker compose ps                          # every service "healthy" or "running"; migrate "exited (0)"
 docker compose logs caddy | grep -i "certificate obtained"
@@ -215,9 +220,10 @@ docker compose exec backup /app/backup/backup.sh               # a first backup 
 free -m && docker stats --no-stream        # compare with section 11
 ```
 
-Then prove the backup restores. **(laptop)**, from a clone with the same `.env` copied over:
+Then prove the backup restores. **(laptop)**, from a clone with the same `.env` copied over (the
+images exist for x86 too):
 ```bash
-cd concord/deploy/prod && docker compose build backup gateway
+cd concord/deploy/prod && docker compose pull backup gateway
 ./restore.sh ~/concord-backup.key latest     # ends "RESTORE VERIFIED: concord-<time>.tar.age"
 ```
 
@@ -264,7 +270,8 @@ Afterwards it deletes both test accounts, and with them the board. It ends with
 
 | Task | How |
 |---|---|
-| Deploy a new version | **Not settled yet: don't run `deploy.sh` on this VM.** It builds while the stack keeps serving: 1,072 MiB of build next to ~650 MiB of running services pushes a 2 GB machine into swap. Until a deploy method is chosen (images built in CI, or a short planned stop), ask before deploying |
+| Deploy a new version | Wait until that commit's CI run is green, including "publish images". Then `cd ~/concord && git pull && deploy/prod/deploy.sh <full SHA>`: a backup with the running version, pull, migrations, then the Session instances one at a time and the gateway. Clients reconnect on their own and lose nothing. It ends by printing the rollback command |
+| Roll back | `deploy/prod/deploy.sh <previous SHA>`, the command the last deploy printed: the same steps, back to the old images. Migrations are forward-only and must keep the previous version working (add, never rename or drop), so the older code runs on the newer schema. Find older SHAs with `git log --oneline` or under GitHub → Actions |
 | Logs | `cd ~/concord/deploy/prod && docker compose logs -f --since 1h gateway` (JSON lines; also `session1`, `session2`, `caddy`, `backup`). Docker keeps 5 × 10 MB per container |
 | Memory | `free -m`, `docker stats --no-stream`, and per JVM `docker compose exec gateway jcmd 1 GC.heap_info` (also `session1`, `session2`). Limits and what is normal: section 11 |
 | A backup now | `docker compose exec backup /app/backup/backup.sh` |
@@ -273,7 +280,7 @@ Afterwards it deletes both test accounts, and with them the board. It ends with
 | Delete a tester's data | `deploy/prod/delete-user.sh someone@example.com` |
 | Restart one service | `docker compose restart session1`. A Session instance hands its boards over gracefully |
 | Change a setting | edit `.env`, then `docker compose up -d --wait` |
-| Disk | `df -h /`; `docker system prune -f` removes old images after deploys |
+| Disk | `df -h /`; `docker image prune -a -f --filter "until=72h"` removes images not used for 3 days (keep the previous version for a rollback) |
 | End of the trial | delete the data (`docker compose down -v`), then **terminate** the instance (EC2 → Instances → Terminate; its volume goes with it), **release** the Elastic IP, delete any snapshots, and delete the B2 bucket within 14 days |
 
 ## 11. Memory on a 2 GB machine
@@ -300,8 +307,9 @@ metaspace, code cache and direct memory:
   docker inspect -f '{{.Name}} oomkilled={{.State.OOMKilled}} restarts={{.RestartCount}}' $(docker compose ps -aq)
   ```
   Tell me if it happens; the limits are not to be raised blindly.
-- **Swap in use** (`free -m`) means something spiked. A little after a build is fine. Steady
-  swap use during the trial is not.
+- **Swap in use** (`free -m`) means something spiked. Steady swap use during the trial is not
+  normal. Nothing is ever built on the VM: a no-cache build of these images took 1,072 MiB on a
+  laptop, too much next to the running stack, which is why CI builds them.
 - **Measured** (`deploy/soak/results.txt`, run 3, these exact limits, 36 minutes, 0 OOM kills):
 
   | | Exact peak (incl. reclaimable cache) | Anonymous memory |
@@ -322,10 +330,10 @@ backups (B2), and the age private key (your password manager).
 2. **Move the Elastic IP:** EC2 → Elastic IPs → 52.62.82.248 → **Disassociate**, then
    **Associate** it with the new instance. DuckDNS needs no change. Don't allocate a second one.
 3. Do sections 3–4 on it, then put `.env` back in `~/concord/deploy/prod/`.
-4. Build, restore the latest backup into the new database, verified, then start everything:
+4. Pull, restore the latest backup into the new database, verified, then start everything:
    ```bash
    cd ~/concord/deploy/prod
-   docker compose build
+   docker compose pull
    nano /tmp/k                                 # paste the age private key; deleted below
    ./restore.sh /tmp/k latest --into-prod      # asks you to type the board count, verifies, starts
    shred -u /tmp/k
