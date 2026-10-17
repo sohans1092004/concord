@@ -12,7 +12,7 @@ public final class Seed {
 
     public static String user(DataSource ds) {
         String id = UUID.randomUUID().toString();
-        exec(ds, "INSERT INTO users (id, email, password_hash) VALUES (?::uuid, ?, 'test-no-login')", id, id + "@test");
+        exec(ds, "INSERT INTO users (id, email, name, password_hash) VALUES (?::uuid, ?, 'Test user', 'test-no-login')", id, id + "@test");
         return id;
     }
 
