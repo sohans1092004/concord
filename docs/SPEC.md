@@ -557,6 +557,16 @@ Target: serving within 5s of the claim for a board of 2,000 cards with a 500-op 
 - If lease renewal fails because Redis is unreachable, the owner keeps serving. Postgres
   still fences it. Boards with no owner cannot be claimed until Redis returns; their clients
   get `UNAVAILABLE` and retry.
+- A stale owner that never writes is never fenced: only a commit checks the fence. Until it
+  drops the board it may answer `JOIN`, `SYNC_REQUEST` and gateway polls from its own memory.
+  Memory changes only after commit (§6.1 step 4), so what it serves is a prefix of the
+  committed history: the client is behind, never wrong, and catches up on the next write or
+  the new owner's `BOARD_VERSION` (§6.4). The window is bounded by the gateway's 5s owner
+  cache: once a gateway's entry expires it re-reads `board:owner:{id}` (§2.3 step 4), so it
+  stops routing to the stale owner within 5s of the new owner's announce (§6.2 step 6). If
+  the stale owner can reach Redis, its next renewal (within 5s) also finds the other lease
+  and drops the board (`StaleReadTest`, `RouterCacheTest`). The bound assumes the gateway
+  can reach Redis: without it, a gateway keeps its last known owner (amendment 7).
 
 ### 6.4 Versions and gap detection
 
@@ -932,3 +942,4 @@ section text itself is updated in the same commit.
 | 9 | 2026-10-17 | §2.2 | Every queue is bounded: actor mailbox (5,000; then `RETRY_LATER`), gateway → client unsent bytes (8 MB; then `RECONNECT_ELSEWHERE` and close), gateway requests per connection (256), owner → gateway unsent bytes (64 MB; then the socket is cut), Redis command queue (10,000). |
 | 10 | 2026-10-17 | §9.4 | The Phase 2 client choices (head-of-queue `INVALID_OP`, in-order queue resend, 10s JOIN timeout, fresh replica after a clock correction) and gateway choices (one board per connection, `access_token` query parameter, Origin optional but token required, `RETRY_LATER` when rate limited, 1s claim watchdog) approved. Access tokens never appear in logs (redacting encoder, tests); Phase 3 replaces the URL token with a single-use 30s ticket from REST. |
 | 11 | 2026-10-17 | §6.2, §8 | Drill for row 3 with the stale owner cut off from Redis, so its lease renewal cannot save it and the Postgres fence must reject its commit (it must log the rejection and commit nothing). A claim whose drawn fence is not above `boards.fence` is counted (`claim_fence_retries`); the wipe-redis drill requires the rebuilt counter to give `boards.fence + 1` with no retry. |
+| 12 | 2026-10-17 | §6.3 | A stale owner that never writes is never fenced and may answer `JOIN`/`SYNC_REQUEST` from stale memory (a prefix of the committed history); the window is bounded by the gateway's 5s owner cache, and by the stale owner's next renewal when it can reach Redis. |
