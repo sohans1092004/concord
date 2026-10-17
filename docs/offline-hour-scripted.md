@@ -55,7 +55,7 @@ after those checks. The failure came after them, in `a.close()`:
 
 ```
 Error: apiRequestContext._wrapApiCall: ENOENT: no such file or directory,
-open '…\web	est-results\.playwright-artifacts-0	races\…'
+open '.../web/test-results/.playwright-artifacts-0/traces/...'
 ```
 
 Playwright could not save the run's trace file. I ran other Playwright tests from the same
