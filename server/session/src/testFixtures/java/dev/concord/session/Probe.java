@@ -19,8 +19,10 @@ public final class Probe implements AutoCloseable {
     public final List<Map<String, Object>> channel = new CopyOnWriteArrayList<>();
     private final Redis redis;
     private final StatefulRedisPubSubConnection<String, String> sub;
+    private final String board;
 
     public Probe(String board) {
+        this.board = board;
         redis = Infra.redis();
         sub = redis.pubSub();
         sub.addListener(new RedisPubSubAdapter<>() {
@@ -31,6 +33,11 @@ public final class Probe implements AutoCloseable {
             }
         });
         sub.sync().subscribe(RedisKeys.channel(board));
+    }
+
+    /** Stops listening on the channel (replies still arrive): the board then has no subscriber. */
+    public void unsubscribe() {
+        sub.sync().unsubscribe(RedisKeys.channel(board));
     }
 
     public BoardActor.Reply reply() {

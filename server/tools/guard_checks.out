@@ -93,3 +93,9 @@ backup-verify-replay: removed checking each board's full replay against the back
 delete-user-heir: removed making a remaining member owner when a deleted user was a shared board's last owner
   test deletingAnAccountRemovesItsDataAndKeepsSharedBoards: FAILED without the guard (org.opentest4j.AssertionFailedError: {error=storage unavailable, try again} ==> expected: <200> but was: <503>); PASSED with it restored
   (delete-user-heir: without the promotion the deletion's transaction fails, so the account is not deleted at all; the test fails on the 503, not on a later ownership assertion)
+
+command: cd server && python tools/guard_checks.py idle-unload-not-reconciling idle-unload-subscribers   (2026-10-17T10:45:23Z, commit d1e9ae3 + uncommitted amendment 26)
+idle-unload-not-reconciling: removed never unloading an idle board while it reconciles an unknown commit outcome (amendment 26)
+  test neverUnloadedWhileReconcilingAnUnknownCommitOutcome: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <dev.concord.session.BoardActor@4f541e67> but was: <null>); PASSED with it restored
+idle-unload-subscribers: removed keeping a board loaded while a gateway is subscribed to its channel (amendment 26)
+  test anIdleBoardIsUnloadedAndARejoinConverges: FAILED without the guard (org.opentest4j.AssertionFailedError: a board with a subscriber stays loaded ==> expected: not <null>); PASSED with it restored

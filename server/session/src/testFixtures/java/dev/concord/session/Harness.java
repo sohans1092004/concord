@@ -26,11 +26,20 @@ public final class Harness implements AutoCloseable {
 
     /** {@code viaProxy}: the instance reaches Postgres through Toxiproxy. */
     public Harness(Function<DataSource, Store> store, boolean viaProxy) {
-        session = start("s-" + Ops.uuid(), store, viaProxy);
+        this(store, viaProxy, Map.of());
+    }
+
+    /** {@code extra}: more CONCORD_* settings for the instance. */
+    public Harness(Function<DataSource, Store> store, boolean viaProxy, Map<String, String> extra) {
+        session = start("s-" + Ops.uuid(), store, viaProxy, extra);
     }
 
     public static SessionMain start(String instanceId, Function<DataSource, Store> store, boolean viaProxy) {
-        Config c = Infra.config(instanceId, Infra.freePort(), viaProxy);
+        return start(instanceId, store, viaProxy, Map.of());
+    }
+
+    public static SessionMain start(String instanceId, Function<DataSource, Store> store, boolean viaProxy, Map<String, String> extra) {
+        Config c = Infra.config(instanceId, Infra.freePort(), viaProxy, extra);
         return new SessionMain(c, store.apply(dev.concord.common.Db.pool(c)));
     }
 

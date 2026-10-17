@@ -104,6 +104,11 @@ public final class Infra {
 
     /** Config for an in-process service. {@code viaProxy}: reach Postgres through Toxiproxy. */
     public static Config config(String instanceId, int port, boolean viaProxy) {
+        return config(instanceId, port, viaProxy, Map.of());
+    }
+
+    /** {@code extra}: more CONCORD_* settings, e.g. a short CONCORD_IDLE_UNLOAD_MS. */
+    public static Config config(String instanceId, int port, boolean viaProxy, Map<String, String> extra) {
         start();
         Map<String, String> env = new HashMap<>();
         env.put("CONCORD_ENV", "dev");
@@ -116,6 +121,7 @@ public final class Infra {
         env.put("CONCORD_PORT", Integer.toString(port));
         env.put("CONCORD_ADVERTISE", "ws://localhost:" + port + "/internal");
         env.put("CONCORD_ALLOWED_ORIGINS", "http://allowed.test");
+        env.putAll(extra);
         return Config.from(env);
     }
 

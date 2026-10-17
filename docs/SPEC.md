@@ -166,6 +166,27 @@ then deletes its lease so the next instance claims at once. On a crash the lease
 after 15s and the next instance claims it. In both cases ops in flight to the old owner fail
 and are resent by the client's pending queue.
 
+### 2.5 Unloading idle boards
+
+A board's state stays in its owner's memory while it is loaded, and grows with the board's
+history (tombstones are kept, decision 9; the last 10,000 ACKs, §4.3). So an owner unloads a
+board nobody has open (amendment 26):
+
+- **Idle means both:** no request (submit, join, sync, poll, ensure) has reached the board's
+  actor for `CONCORD_IDLE_UNLOAD_MS` (10 minutes), and `PUBSUB NUMSUB board:{id}` is 0. A
+  gateway is subscribed while it has a client on the board. A gateway polling the owner because
+  its Pub/Sub is down sends a request every second, so it keeps the board too.
+- **Unloading is the graceful handover:** snapshot if anything changed since the last one,
+  release the lease, close. The next request claims the board and loads it from that
+  snapshot. A resend of an op ACKed before the unload gets its original ACK from the primary
+  key on `board_ops` (§4.3 step 2).
+- **Never:**
+  - while reconciling an unknown commit outcome;
+  - with ops in the mailbox or the group-commit batch;
+  - when Redis cannot say how many subscribers there are.
+- Checked at most every 30s once the idle time has passed. A request racing the close is
+  answered `NOT_OWNER`, as in any handover, and is resent.
+
 ## 3. CRDT design
 
 Two CRDTs cover everything: an OR-Set decides which lists and cards exist, and a
@@ -1092,3 +1113,4 @@ section text itself is updated in the same commit.
 | 23 | 2026-10-17 | §9.4 | Revised in Phase 4a: the client IP for per-IP limits is the last `X-Forwarded-For` entry only when the request's socket address is the trusted proxy (`CONCORD_TRUSTED_PROXY`, Caddy, re-resolved every 30s); any other source uses its socket address (`ApiTest.forwardedForIsBelievedOnlyFromTheTrustedProxy`, guard check `trusted-proxy-only`). |
 | 24 | 2026-10-17 | §9.6 (new), §9.4 | Trial deployment: Caddy with Let's Encrypt as the only open ports; 1 gateway, 2 Session instances, Postgres, Redis, backups; explicit heaps and memory limits; production refuses every dev value (`Config.checkPublic`); the gateway sets the CSP and `/healthz` checks Postgres and free disk. The server image uses the JDK (jcmd for memory checks). |
 | 25 | 2026-10-17 | §2.1, §9.6 | Verified backups (`Backup dump`/`verify`, one exported snapshot for dump and manifest; guard check `backup-verify-replay`). Account deletion, `DELETE /api/me` and `Accounts delete <email>` (guard check `delete-user-heir`). |
+| 26 | 2026-10-17 | §2.5 (new) | An owner unloads a board after 10 minutes with no request and no gateway subscribed to its channel, through the graceful handover path (snapshot, release the lease, close); never while reconciling, with ops in the mailbox or batch, or when Redis cannot count subscribers. Found by the Phase 4a soak: without it, a Session instance's heap grew with the history of every board it had loaded (`IdleUnloadTest`; guard checks `idle-unload-not-reconciling`, `idle-unload-subscribers`). |

@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
  *   CLAIMING ──claim+load ok──▶ SERVING ──commit failed / timed out──▶ RECONCILING
  *       │                        │  ▲                                     │
  *       └──not owner──▶ CLOSED ◀─┘  └──────────── reload ok ─────────────┘
- *                         ▲  fenced out, lease lost, released
+ *                         ▲  fenced out, lease lost, released, unloaded when idle (amendment 26)
  * </pre>
  */
 public final class BoardActor {
@@ -76,7 +76,13 @@ public final class BoardActor {
 
     /** Everything an actor needs from its instance. */
     public record Deps(Store store, Ownership ownership, Membership membership, Publisher publisher,
-                       Metrics metrics, LongSupplier clock, int batchMs) {}
+                       Metrics metrics, LongSupplier clock, int batchMs, Subscribers subscribers, long idleUnloadMs) {}
+
+    /** Gateways subscribed to the board's channel, one per gateway with a client on it; -1 if unknown. */
+    @FunctionalInterface
+    public interface Subscribers {
+        long count(String board);
+    }
 
     private final String id;
     private final Deps d;
@@ -104,6 +110,8 @@ public final class BoardActor {
     private final Set<String> batchLists = new HashSet<>(), batchCards = new HashSet<>();
     private long batchDeadline;
     private long nextBoardVersion;
+    /** When the last request reached this actor, and when to next ask whether anyone has it open. */
+    private long lastActivity, nextIdleCheck;
     private int opsSinceSnapshot;
     private long lastSnapshotAt;
     /** The owner's own replica (SPEC §3.7 rebalancing): fresh per claim, ahead of every HLC applied. */
@@ -196,6 +204,7 @@ public final class BoardActor {
             long now = d.clock().getAsLong();
             lastSnapshotAt = now;
             nextBoardVersion = now;
+            lastActivity = now;
             state = State.SERVING;
             d.metrics().inc("claims");
             log.atInfo().addKeyValue("board_id", id).addKeyValue("fence", fence).addKeyValue("version", version)
@@ -212,8 +221,12 @@ public final class BoardActor {
         long wake = nextBoardVersion;
         if (!batch.isEmpty()) wake = Math.min(wake, batchDeadline);
         if (opsSinceSnapshot > 0) wake = Math.min(wake, lastSnapshotAt + SNAPSHOT_EVERY_MS);
+        wake = Math.min(wake, Math.max(lastActivity + d.idleUnloadMs(), nextIdleCheck));
         Item item = mailbox.poll(Math.max(0, wake - now), TimeUnit.MILLISECONDS);
-        if (item != null) handle(item);
+        if (item != null) {
+            lastActivity = d.clock().getAsLong();
+            handle(item);
+        }
         if (state != State.SERVING) return;
         now = d.clock().getAsLong();
         if (!batch.isEmpty() && now >= batchDeadline) flush();
@@ -223,6 +236,7 @@ public final class BoardActor {
             nextBoardVersion = now + BOARD_VERSION_EVERY_MS;
         }
         if (opsSinceSnapshot >= SNAPSHOT_EVERY_OPS || (opsSinceSnapshot > 0 && now - lastSnapshotAt >= SNAPSHOT_EVERY_MS)) snapshot();
+        unloadIfIdle();
     }
 
     private void handle(Item item) {
@@ -492,7 +506,11 @@ public final class BoardActor {
                 long until = d.clock().getAsLong() + backoff;
                 for (long left; state == State.RECONCILING && (left = until - d.clock().getAsLong()) > 0; ) {
                     Item item = mailbox.poll(left, TimeUnit.MILLISECONDS);
-                    if (item != null) whileReconciling(item);
+                    if (item != null) {
+                        lastActivity = d.clock().getAsLong();
+                        whileReconciling(item);
+                    }
+                    unloadIfIdle(); // refuses while reconciling; asked here so that rule is what keeps the board
                 }
                 backoff = Math.min(backoff * 2, 5_000);
             }
@@ -585,6 +603,27 @@ public final class BoardActor {
         }
         opsSinceSnapshot = 0;
         lastSnapshotAt = d.clock().getAsLong();
+    }
+
+    /**
+     * Amendment 26: a board nobody has open (no request for idleUnloadMs, and no gateway on its
+     * channel) is unloaded the way a graceful handover releases it: snapshot, release the lease,
+     * close. The next request claims it again and loads it from that snapshot. Never while
+     * reconciling an unknown commit outcome, and never with ops still in the mailbox or batch.
+     */
+    private void unloadIfIdle() {
+        long now = d.clock().getAsLong();
+        if (now - lastActivity < d.idleUnloadMs() || now < nextIdleCheck) return;
+        nextIdleCheck = now + Math.min(30_000, d.idleUnloadMs() / 4);
+        if (state != State.SERVING) return; // never while reconciling: the board's state is not known yet
+        if (!batch.isEmpty() || !mailbox.isEmpty()) return; // never with ops still to commit or answer
+        if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say
+        if (opsSinceSnapshot > 0) snapshot();
+        safeRelease();
+        d.metrics().inc("idle_unloads");
+        log.atInfo().addKeyValue("board_id", id).addKeyValue("version", version)
+                .addKeyValue("idle_ms", now - lastActivity).log("unloaded idle board");
+        close(Msg.NOT_OWNER, "board unloaded: idle");
     }
 
     /** SPEC §2.4: stop taking ops (the instance already does), flush, snapshot, release. */

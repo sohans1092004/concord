@@ -38,7 +38,7 @@ public final class SessionMain implements AutoCloseable {
         Membership membership = new Membership(store, System::currentTimeMillis);
         Ownership ownership = new Ownership(redis.conn.sync(), store, config.instanceId(), config.advertise(), metrics);
         this.boards = new Boards(new BoardActor.Deps(store, ownership, membership, Publisher.redis(redis.conn.async()),
-                metrics, System::currentTimeMillis, config.batchMs()));
+                metrics, System::currentTimeMillis, config.batchMs(), board -> subscribers(board), config.idleUnloadMs()));
         membershipSub = redis.pubSub();
         membershipSub.addListener(new RedisPubSubAdapter<>() {
             @Override
@@ -50,6 +50,17 @@ public final class SessionMain implements AutoCloseable {
         this.server = new InternalServer(boards, metrics, config.port(), config.internalSecret());
         this.registry = new Registry(redis.conn.sync(), new Rendezvous.Instance(config.instanceId(), config.advertise()), System::currentTimeMillis);
         log.atInfo().addKeyValue("instance", config.instanceId()).addKeyValue("address", config.advertise()).log("session instance up");
+    }
+
+    /** PUBSUB NUMSUB board:{id}; -1 when Redis does not answer within 1s (then nothing is unloaded). */
+    private long subscribers(String board) {
+        String channel = RedisKeys.channel(board);
+        try {
+            return redis.conn.async().pubsubNumsub(channel).get(1, java.util.concurrent.TimeUnit.SECONDS).getOrDefault(channel, 0L);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            return -1;
+        }
     }
 
     public int port() {

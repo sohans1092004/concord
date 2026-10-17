@@ -104,6 +104,14 @@ CHECKS = {
         "checking each board's full replay against the backup manifest (Phase 4a step 5)",
         [(BACKUP, "                if (!expected.equals(viaReplay)) problems.add(board + \": full replay \" + viaReplay + \", manifest \" + expected);\n", "")],
         "dev.concord.session.BackupTest.verifyPassesOnTheSameDataAndCatchesDamage", True),
+    "idle-unload-not-reconciling": (
+        "never unloading an idle board while it reconciles an unknown commit outcome (amendment 26)",
+        [(ACTOR, "        if (state != State.SERVING) return; // never while reconciling: the board's state is not known yet\n", "")],
+        "dev.concord.session.IdleUnloadTest.neverUnloadedWhileReconcilingAnUnknownCommitOutcome", True),
+    "idle-unload-subscribers": (
+        "keeping a board loaded while a gateway is subscribed to its channel (amendment 26)",
+        [(ACTOR, "        if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say\n", "")],
+        "dev.concord.session.IdleUnloadTest.anIdleBoardIsUnloadedAndARejoinConverges", True),
     "delete-user-heir": (
         "making a remaining member owner when a deleted user was a shared board's last owner",
         [(ACCOUNTS, "                        exec(c, \"UPDATE board_members SET role = 'owner' WHERE board_id = ? AND user_id = ?\", b, UUID.fromString(heir));\n", "")],

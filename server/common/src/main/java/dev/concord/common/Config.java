@@ -29,7 +29,8 @@ public record Config(
         String webDir, // gateway: built web app to serve at /, or empty
         int signInIpBurst, // sign-in/up attempts per IP before 1 per 10s (SPEC §9.4: 30)
         String trustedProxy, // gateway: host whose X-Forwarded-For is believed (Caddy); empty: none
-        String publicOrigin) { // gateway: https://host the app is served at (CSP, Origin allowlist); empty in dev
+        String publicOrigin, // gateway: https://host the app is served at (CSP, Origin allowlist); empty in dev
+        long idleUnloadMs) { // session: an owned board nobody has open is unloaded after this (amendment 26)
 
     /** The dev internal secret; a non-dev server refuses to start with it. */
     public static final String DEV_INTERNAL_SECRET = "concord-dev-only-internal-secret-0000000";
@@ -63,7 +64,8 @@ public record Config(
                 e.getOrDefault("CONCORD_WEB_DIR", ""),
                 Integer.parseInt(e.getOrDefault("CONCORD_SIGNIN_IP_BURST", "30")),
                 e.getOrDefault("CONCORD_TRUSTED_PROXY", ""),
-                e.getOrDefault("CONCORD_PUBLIC_ORIGIN", ""));
+                e.getOrDefault("CONCORD_PUBLIC_ORIGIN", ""),
+                Long.parseLong(e.getOrDefault("CONCORD_IDLE_UNLOAD_MS", "600000")));
     }
 
     public boolean dev() {
@@ -80,6 +82,7 @@ public record Config(
                 throw new IllegalStateException("CONCORD_DB_PASSWORD must be at least 16 characters, and not the dev one, outside dev");
         }
         if (batchMs < 0) throw new IllegalStateException("CONCORD_BATCH_MS must be >= 0");
+        if (idleUnloadMs < 1_000) throw new IllegalStateException("CONCORD_IDLE_UNLOAD_MS must be at least 1000");
         if (clientOutboxBytes < 64 * 1024) throw new IllegalStateException("CONCORD_CLIENT_OUTBOX_BYTES must be at least 64 KB");
         return this;
     }
