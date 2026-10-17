@@ -1,0 +1,34 @@
+# Memory soak, run 1: 2026-10-17 08:23-10:28 UTC, dev stack (deploy/docker-compose.yml: 2 gateways, 3 sessions, G1, no heap cap)
+command: cd client-core && SOAK_MINUTES=125 npx vitest run test/soak; then python deploy/soak/verdict.py deploy/soak/2026-10-17T08-23-03-800Z.jsonl
+criterion (Phase 4a): heap after a full GC flat across the second hour on every JVM
+
+26 samples, minutes 0..125; second hour: 14 samples
+JVM                     first MB  h2 start    h2 end   h2 min   h2 max  slope MB/h   limit  verdict
+deploy-gateway1-1           20.1      17.8      17.9     17.8     18.5        0.11     2.0  flat
+deploy-gateway2-1           17.5      18.8      18.6     18.6     18.9       -0.08     2.0  flat
+deploy-session1-1           13.0      12.0      12.2     12.0     12.2        0.03     2.0  flat
+deploy-session2-1           12.4      13.4      15.0     13.4     15.0        1.62     2.0  flat
+deploy-session3-1           15.6      19.8      24.4     19.8     24.4        4.61     2.0  GROWING
+load: {'edits': 21900, 'connections': 5170, 'slow': 62, 'errors': 4}
+
+RESULT: FAILED on session3 (4.61 MB/h, limit 2.0). The gateways and session1 are flat; session2 flat but close (1.62).
+
+Why (diagnosed, not yet fixed):
+- Growth tracks the active boards each instance owns: the 4 soak boards (~5,500 ops each by the end)
+  were owned 3 by session3, 1 by session2, 0 by session1. About 1.5 MB/h per active board, ~1 KB per op.
+- Heap histogram (session3, minute ~95): dev.concord.crdt.Lww$Register 12,016 and Hlc 8,878 objects plus
+  their Strings/HashMap nodes: CRDT state. On one soak board 1,175 of 1,228 added cards were deleted;
+  their tombstones and registers are kept for the board's life (SPEC decision 9), and each board keeps its
+  last 10,000 ACKed op_ids (SPEC 4.3), which was still filling.
+- The SPEC has no rule for unloading a board nobody has open: a loaded board stays in memory until its
+  instance stops or hands it over. So heap grows with the history of every board loaded, unbounded.
+- The soak workload adds and deletes cards without end, so it grows board state by design; it cannot be
+  flat on a JVM that owns an active board even without a leak.
+
+Errors: 4, all at minutes 26-31 (08:48-08:54 UTC): Postgres stalled (checkpoints of 62s and 54s) while
+rehearsal images were being built on the same laptop; JDBC socketTimeout (10s) fired, gateways answered
+8 requests 503 "storage unavailable", 16 commits failed and every one was reconciled. No data lost.
+
+Proposed (awaiting approval): amendment 26, an owner releases a board after 10 minutes with no
+subscribers; and a rerun on an idle machine with a fixed-size workload (field edits, moves, presence on
+a fixed set of cards) so the criterion tests for leaks rather than board growth.
