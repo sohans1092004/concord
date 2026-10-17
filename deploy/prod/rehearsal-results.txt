@@ -61,3 +61,53 @@ JVMs use the Serial collector (the JVM's choice for containers under 1792 MB); h
 ## Local suites after amendment 26 (2026-10-17T12:55:20Z, commit 7207093)
 client-core e2e (npx vitest run test/e2e): 6 passed; drills (deploy/drills/run-all.sh): all passed
 Playwright (npx playwright test): 18 passed, 2 skipped (offline hour, deployed URL), 1 failed: perf.spec strict local target (max < 16ms); rerun: n=599 p50 5.20 p95 9.40 p99 12.80 max 16.40 ms, 1 of 599 >= 16ms, 0 long tasks. Machine busy (both compose stacks, VS Code); the strict check is pending the reboot run.
+
+## Published images: no secret in any layer (2026-10-17, images of 34a2fd5 from ghcr.io)
+What reaches an image (server/Dockerfile, multi-stage): /app/session and /app/gateway (Gradle
+installDist: jars of checked-in code and resources), /app/web (the Vite bundle; it reads only
+VITE_BUILD, the commit SHA), /app/backup (backup.sh, schedule.sh). No build ARG but VITE_BUILD; the
+only ENV is JAVA_OPTS. CI's build context is a fresh checkout: .env files, keys and .pem files are
+gitignored and none was ever committed (git log --all on *.env, .env, *.key, *.pem: none). Local
+builds: .dockerignore excludes **/.env, **/.env.*, **/*.key, **/*.pem, restore-work.*, test results.
+Scan of every file (scratchpad scan_layers.py: secret-looking file names, AGE-SECRET-KEY-1...,
+"-----BEGIN ... PRIVATE KEY-----", and the 5 real secret values of a local .env):
+  arm64 (per layer, docker save): concord-server 4,986 files, concord-backup 6,952 files
+  amd64 (exported filesystem; docker save of the second platform produced no layers here):
+        concord-server 4,798 files, concord-backup 6,745 files
+  secret values found: 0. Pattern matches: only stock Ubuntu package files, the same on both
+  architectures: libgnutls (its built-in EC self-test keys), libssh (an error-message string),
+  /usr/bin/age-keygen (a constant key string in Ubuntu's age binary; not ours). `dpkg -V age
+  libgnutls30t64 libssh-4` in the image: no modified file (only stripped docs missing).
+Anonymous pull (docker logout ghcr.io; docker pull): works, so both packages are public.
+
+## Pull-based install, deploy and rollback (2026-10-17, laptop, production compose via deploy/prod/rehearse.sh, a quick tunnel; images from ghcr.io, nothing built)
+versions: A = 34a2fd5a48e5f0d5654d8bee305098c3f0ac89bf, B = 34bcdaba1c3ee989e60cd46ce63ea8e8d7fcee19 (both published by CI after all tests)
+install (CONCORD_TAG=A; rehearse.sh up = pull + up --wait): 19:55:13-19:55:50, 37s; every app service on ghcr.io/sohans1092004/concord-*:A, healthy
+smoke test through the tunnel: passed; sync latency (edit until the other client shows it, laptop in India -> Cloudflare -> laptop) n=30 p50 89 ms, p95 94 ms, max 94 ms
+command for each leg: SMOKE_LIVE_SECONDS=240 npx vitest run test/smoke -t 'loses nothing' (3 clients via the tunnel), deploy/prod/rehearse.sh ./deploy.sh <sha> started 30s in
+##### deploy to 34bcdaba1c3e (running 34a2fd5a48e5) at 20:03:28
+== 20:03:58 backup before deploying (running version 34a2fd5a48e5)
+== 20:03:59 pull 34bcdaba1c3e
+== 20:04:22 migrate (forward-only)
+== 20:04:24 replace session1
+== 20:04:41 replace session2
+== 20:04:58 replace gateway
+== 20:05:10 the rest (backup; caddy and redis only if their config changed)
+== 20:05:18 done: running 34bcdaba1c3e
+roll back with: deploy/prod/deploy.sh 34a2fd5a48e5f0d5654d8bee305098c3f0ac89bf
+deploy.sh exit 0
+LIVE {"url":"https://des-pro-notification-serum.trycloudflare.com","seconds":240,"submitted":1892,"acked":1893,"board_version":1893,"history":1893,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+##### rollback to 34a2fd5a48e5 (running 34bcdaba1c3e) at 20:07:39
+== 20:08:09 backup before deploying (running version 34bcdaba1c3e)
+== 20:08:10 pull 34a2fd5a48e5
+== 20:08:14 migrate (forward-only)
+== 20:08:16 replace session1
+== 20:08:34 replace session2
+== 20:08:51 replace gateway
+== 20:09:03 the rest (backup; caddy and redis only if their config changed)
+== 20:09:10 done: running 34a2fd5a48e5
+roll back with: deploy/prod/deploy.sh 34bcdaba1c3ee989e60cd46ce63ea8e8d7fcee19
+deploy.sh exit 0
+LIVE {"url":"https://des-pro-notification-serum.trycloudflare.com","seconds":240,"submitted":1832,"acked":1833,"board_version":1833,"history":1833,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+restore of the backup taken by the rollback (rehearse.sh ./restore.sh <key> latest): RESTORE VERIFIED: concord-20261017T200809Z.tar.age (202 ops, 1 board, 0 problems)
+result: deploy A->B and rollback B->A both passed: 0 ACKed ops missing, 0 Unsent edits, every client rejoined once and converged; afterwards every app container ran the target tag
