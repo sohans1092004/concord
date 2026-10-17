@@ -46,3 +46,19 @@ What it does:
 | Reconnect to converged | 11,237 ms |
 | Converged | yes: board version 380, both browsers on state hash `d316a445…41d54c61` |
 | Unsent edits | 0 on A, 0 on B |
+
+## Test status: reported as failed, in teardown
+
+Playwright marked this run **failed**. Every assertion passed first: both browsers on the
+same hash, and `unsent` 0 on each. The log line `converged … unsent 0 and 0` is printed only
+after those checks. The failure came after them, in `a.close()`:
+
+```
+Error: apiRequestContext._wrapApiCall: ENOENT: no such file or directory,
+open '…\web	est-results\.playwright-artifacts-0	races\…'
+```
+
+Playwright could not save the run's trace file. I ran other Playwright tests from the same
+`web/` directory during the hour (board and perf tests), and each run clears
+`test-results/`, deleting this run's trace directory. That is a fault in how I ran it, not
+in Concord. A clean rerun, with nothing else running, is needed before this counts as a pass.
