@@ -114,6 +114,18 @@ free -m          # Swap: 2047 total
 `vm.swappiness=10` keeps the kernel from swapping out memory that is in use; it swaps only under
 real pressure.
 
+**Switch off what an EC2 server doesn't use**, to make room. Measured on this VM, with only the OS
+running: `used` was 503 MiB after a reboot, and 458 MiB after this.
+```bash
+sudo systemctl disable --now ModemManager udisks2 multipathd.service multipathd.socket
+free -m          # Mem: total 1834, used about 460
+```
+- **ModemManager** manages cellular modems; **udisks2** auto-mounts desktop drives;
+  **multipathd** handles multipath SAN storage, while the root disk is a single EBS volume.
+- Leave **snapd** (AWS's SSM agent is a snap) and **unattended-upgrades** (security updates).
+- With these off: the OS's ~460 MiB plus Concord's limits of 1,336 MiB = 1,794 MiB, which fits
+  in the 1,834 MiB of RAM even if every container sat at its limit.
+
 **Docker, from Docker's own repository.** It supports Ubuntu 26.04 (`resolute`) on arm64: on
 2026-10-17 it listed `docker-ce` 29.9.1 and `docker-compose-plugin` 5.6.0 for
 `resolute/stable/binary-arm64`.
@@ -291,12 +303,12 @@ metaspace, code cache and direct memory:
 | Container | Limit | JVM |
 |---|---|---|
 | gateway | 320 MiB | heap 128 MiB (its threads, metaspace and buffers need the rest) |
-| session1, session2 | 304 MiB each | heap 160 MiB |
+| session1, session2 | 288 MiB each | heap 160 MiB |
 | postgres | 224 MiB | shared_buffers 48 MB |
 | redis | 40 MiB | |
-| caddy | 56 MiB | |
-| backup | 160 MiB | heap 80 MiB, only while dumping |
-| **Total** | **1,408 MiB** | about 74% of the ~1.9 GiB the kernel reports, so at least 25% headroom even if every container sat at its limit |
+| caddy | 48 MiB | |
+| backup | 128 MiB | heap 80 MiB, only while dumping |
+| **Total** | **1,336 MiB** | 72.8% of the 1,834 MiB the VM reports (`free -m`), so 27% headroom even if every container sat at its limit |
 | migrate | 128 MiB | only for seconds, during a deploy |
 
 - **Normal:** measured use, and the soak with these exact limits, are in
@@ -364,6 +376,6 @@ sections 2–4.
 ## 14. Reliant
 
 The earlier plan was Reliant on the same VM behind the same Caddy, at `reliant-<me>.duckdns.org`.
-On a 2 GB t4g.small that is **not possible**: Concord's limits take 1,408 MiB of about 1.9 GiB,
+On a 2 GB t4g.small that is **not possible**: Concord's limits take 1,336 MiB of 1,834 MiB,
 and Reliant needs more than what is left. Reliant needs its own instance, a larger one (which
 costs credits faster), or the Oracle option above.

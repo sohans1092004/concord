@@ -11,14 +11,14 @@
 # headers, and the one way in. Postgres, Redis, the Session instances and the gateway stay on
 # the internal network. Two Session instances, so a board's owner can fail over (SPEC §2.4).
 #
-# Memory: sized for a 2 GB VM (AWS t4g.small; MemTotal about 1,900 MiB). Container limits, steady:
-#   gateway 320 + session1 304 + session2 304 + postgres 224 + redis 40 + caddy 56 + backup 160
-#   = 1,408 MiB, 74% of 1,900: 26% headroom even if every container sat at its limit. migrate
-#   (128) runs only during a deploy: 1,536 MiB for those seconds. Measured use was ~584 MiB
-#   (Phase 4a soak). JVMs: Serial GC, capped heap, metaspace, code cache and direct memory;
-#   MALLOC_ARENA_MAX=2 keeps glibc from growing native arenas per thread. The gateway has more
-#   room than its heap suggests: its native memory (threads, metaspace, buffers) peaked at 243 MiB
-#   in a laptop soak with a 288 limit, so it gets 320 and each Session 304.
+# Memory: sized for a 2 GB VM (AWS t4g.small; MemTotal 1,834 MiB, measured on the VM). Limits:
+#   gateway 320 + session1 288 + session2 288 + postgres 224 + redis 40 + caddy 48 + backup 128
+#   = 1,336 MiB, 72.8% of 1,834: 27% headroom even if every container sat at its limit. migrate
+#   (128) runs only during a deploy. Each limit is at least 23% above its measured peak
+#   (deploy/soak/results.txt, run 3: gateway 260, sessions 171/195, backup 91, caddy 29 MiB).
+#   JVMs: Serial GC, capped heap, metaspace, code cache and direct memory; MALLOC_ARENA_MAX=2 keeps
+#   glibc from growing native arenas per thread. The gateway gets more than its heap suggests:
+#   its threads, metaspace and buffers came to 243 MiB within minutes under a 288 limit.
 
 x-logging: &logging
   logging:
@@ -44,7 +44,7 @@ x-session: &session
   <<: *server
   command: ["/app/session/bin/session"]
   stop_grace_period: 20s # graceful handover: flush, snapshot, release (SPEC §2.4)
-  mem_limit: 304m
+  mem_limit: 288m
   depends_on:
     migrate: { condition: service_completed_successfully }
     redis: { condition: service_healthy }
@@ -136,7 +136,7 @@ services:
     <<: *logging
     image: caddy:2.8.4-alpine
     restart: unless-stopped
-    mem_limit: 56m
+    mem_limit: 48m
     ports: ["80:80", "443:443"]
     environment:
       CADDY_SITE: ${CONCORD_DOMAIN} # the rehearsal sets ":80": the tunnel does the TLS
@@ -153,7 +153,7 @@ services:
     <<: *server
     image: ghcr.io/sohans1092004/concord-backup:${CONCORD_TAG:?set CONCORD_TAG in .env}
     command: ["/app/backup/schedule.sh"]
-    mem_limit: 160m
+    mem_limit: 128m
     environment:
       <<: *env
       CONCORD_DB_POOL: "2"

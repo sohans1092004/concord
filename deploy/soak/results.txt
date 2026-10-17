@@ -90,3 +90,11 @@ RESULT: PASSED, fits 1,408 MiB of limits (74% of ~1.9 GiB)
 # Build memory, 2026-10-17 19:24-19:27 UTC
 command: docker build --no-cache -f server/Dockerfile --target backup . (both stages: Gradle and the web build), sampling the Docker VM's MemAvailable every 1s
 result: 2m21s; MemAvailable from 5,385 MiB down to 4,312 MiB: the build took up to 1,072 MiB (laptop: more cores, so more Gradle workers than a 2 vCPU VM)
+
+# Memory check, run 4: the limits for the VM's measured 1,834 MiB, 2026-10-17 20:45:37-21:02:42 UTC
+the VM reported MemTotal 1,834 MiB (free -m), not the ~1,900 assumed: 1,408 MiB of limits would leave 23% headroom; lowered to 1,336 (sessions 288, caddy 48, backup 128), 72.8%, 27% headroom. OS on the VM after a reboot: 503 MiB used, 458 MiB with ModemManager, udisks2 and multipathd off: 458 + 1,336 = 1,794 < 1,834 even at every limit
+command: as run 3 with SOAK_MINUTES=15 SOAK_EDIT_MS=200 SOAK_SAMPLE_S=60; backup dump and migrate at minute 7
+purpose: peaks and OOM kills under the new limits (heaps unchanged from run 3, which showed them flat; 15 minutes is before the ACK caches fill, so no heap verdict from this run)
+exact peaks / anonymous at the end, MiB: gateway 245.2/207.9 of 320 | session1 145.6/113.0 of 288 | session2 188.2/157.4 of 288 | postgres 183.0/19.6 of 224 | redis 10.3/3.2 of 40 | caddy 28.9/16.4 of 48 | backup 83.9 (dump of 15,198 ops) of 128
+load: 33,010 edits, 638 connections, 8 slow consumers, 0 errors; OOM kills 0, restarts 0; samples in deploy/soak/2026-10-17T20-46-06-299Z.jsonl
+RESULT: PASSED
