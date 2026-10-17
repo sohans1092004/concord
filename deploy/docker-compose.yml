@@ -18,7 +18,11 @@ x-env: &env
   CONCORD_DB_USER: concord
   CONCORD_DB_PASSWORD: concord
   CONCORD_REDIS_URL: redis://redis:6379
-  CONCORD_ALLOWED_ORIGINS: http://localhost:5173
+  # Vite dev (5173), vite preview as Playwright runs it (4173), and the app served by a gateway.
+  CONCORD_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:4173,http://localhost:8081,http://localhost:8082
+  # The browser tests sign up dozens of users from one IP (and Vite's proxy makes every
+  # browser one IP); the default is 30 (SPEC §9.4).
+  CONCORD_SIGNIN_IP_BURST: "1000"
 
 x-session: &session
   <<: *server

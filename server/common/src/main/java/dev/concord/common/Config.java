@@ -26,7 +26,8 @@ public record Config(
         long clientOutboxBytes, // per-connection unsent bytes before the gateway drops a client
         String inviteCode, // sign-up requires this code when set; empty: open sign-up
         boolean cookieSecure, // the session cookie's Secure flag (browsers treat http://localhost as secure)
-        String webDir) { // gateway: built web app to serve at /, or empty
+        String webDir, // gateway: built web app to serve at /, or empty
+        int signInIpBurst) { // sign-in/up attempts per IP before 1 per 10s (SPEC §9.4: 30)
 
     /** The dev internal secret; a non-dev server refuses to start with it. */
     public static final String DEV_INTERNAL_SECRET = "concord-dev-only-internal-secret-0000000";
@@ -57,7 +58,8 @@ public record Config(
                 Long.parseLong(e.getOrDefault("CONCORD_CLIENT_OUTBOX_BYTES", Long.toString(8L << 20))),
                 e.getOrDefault("CONCORD_INVITE_CODE", ""),
                 !e.getOrDefault("CONCORD_COOKIE_SECURE", "true").equals("false"),
-                e.getOrDefault("CONCORD_WEB_DIR", ""));
+                e.getOrDefault("CONCORD_WEB_DIR", ""),
+                Integer.parseInt(e.getOrDefault("CONCORD_SIGNIN_IP_BURST", "30")));
     }
 
     public boolean dev() {

@@ -142,7 +142,7 @@ final class Api {
 
     private void signUp(Context ctx) throws SQLException {
         Map<?, ?> b = body(ctx);
-        if (!allowed("ip:" + ctx.ip(), 0.1, 30)) throw new HttpResponseException(429, "too many attempts, try again in a minute");
+        if (!allowed("ip:" + ctx.ip(), 0.1, config.signInIpBurst())) throw new HttpResponseException(429, "too many attempts, try again in a minute");
         if (!config.inviteCode().isEmpty() && !java.security.MessageDigest.isEqual(
                 config.inviteCode().getBytes(java.nio.charset.StandardCharsets.UTF_8), str(b, "invite_code", 0, 200).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
             throw new HttpResponseException(403, "a valid invite code is required");
@@ -166,7 +166,7 @@ final class Api {
     private void signIn(Context ctx) throws SQLException {
         Map<?, ?> b = body(ctx);
         String email = String.valueOf(b.get("email")).trim().toLowerCase(java.util.Locale.ROOT);
-        if (!allowed("email:" + email, 1 / 60.0, 5) || !allowed("ip:" + ctx.ip(), 0.1, 30))
+        if (!allowed("email:" + email, 1 / 60.0, 5) || !allowed("ip:" + ctx.ip(), 0.1, config.signInIpBurst()))
             throw new HttpResponseException(429, "too many sign-in attempts, try again in a minute");
         var rows = query("SELECT id, name, password_hash FROM users WHERE email = ?", email);
         String hash = rows.isEmpty() ? dummyHash : (String) rows.get(0).get("password_hash");
