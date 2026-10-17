@@ -106,6 +106,22 @@ through Redis to every gateway serving that board.
 | REST API (Java, may share the gateway process) | Sign-in, boards, membership, cold snapshot, history | Live op traffic |
 | Client (TypeScript, React) | Local replica, optimistic apply, IndexedDB queue, offline mode, rendering | Trusts its own clock beyond §3.1 |
 
+REST endpoints (Phase 3; `server/gateway/.../Api.java`). Any member may read; only owners
+manage members; a board always keeps at least one owner (changing the last owner's role or
+removing them is refused, under a row lock); every membership change publishes on
+`membership` (§5.2). A non-member gets 404 for a board, never 403, so a board's existence is
+not revealed. The built web app is served by the gateway (`CONCORD_WEB_DIR`), same origin as
+the API.
+
+| Call | Does |
+|---|---|
+| `POST /api/auth/sign-up`, `sign-in`, `sign-out`, `password`; `GET /api/me` | §9.4 |
+| `POST /api/ws-ticket` | A single-use WebSocket ticket, valid 30s (§9.4) |
+| `GET /api/boards`, `POST /api/boards` | My boards with my role; create a board (its creator is its owner) |
+| `GET/POST /api/boards/{id}/members`, `PATCH/DELETE …/members/{user}` | List; add an existing user by email with a role; change a role; remove (an owner, or a member leaving) |
+| `GET /api/boards/{id}/history?before_version=&limit=` | `board_ops` of the last 30 days, newest first, 50 per page (200 at most), with the sender's name; the owner's rebalancing ops have no user |
+| `POST /api/bug-reports` | The trial's in-app report: description and the diagnostics the tester left ticked, redacted (§9.4) |
+
 ### 2.2 Board actor and threads
 
 Each board is an actor: one mailbox, drained by one thread at a time, so merge code takes
@@ -1022,3 +1038,4 @@ section text itself is updated in the same commit.
 | 16 | 2026-10-17 | §5.2, §7.5 | Presence specified: `state` is `active` or `idle`; client sends on join, on change and every 10s; gateway-only, in Redis, never Postgres; snapshot after `JOINED`; `left` on disconnect and from each gateway's 10s sweep, idempotent on the client (`PresenceTest`, guard checks `presence-sweep`, `presence-joined-board`). |
 | 17 | 2026-10-17 | §7.1 | Tab replicas: replica ID in `sessionStorage`, held by a Web Lock; a duplicated tab whose stored ID is locked makes a new one (`offline.spec.ts`, guard check `duplicate-tab-lock`). Adoption takes the record's lock first and is one IndexedDB transaction (guard check `adoption-lock`). A service worker caches the app shell for offline reloads. |
 | 18 | 2026-10-17 | §7.3 | Liveness: 15s with no message drops a joined connection and reconnects; the browser's `offline` event drops it at once and `online` reconnects without backoff. Found by the Phase 3 offline test: Chromium's offline mode, like a dropped network, leaves the WebSocket open (guard checks `silence-drop`, `offline-event`). |
+| 19 | 2026-10-17 | §2.1 | REST endpoints listed; approved defaults: members readable by any member, managed by owners, at least one owner kept, 404 for non-members; history 30 days, paged by version; in-app bug reports. The web app remembers who is signed in (no secret) in `localStorage`, so a new tab opens offline too. |

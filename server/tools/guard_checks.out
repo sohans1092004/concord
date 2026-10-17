@@ -69,3 +69,8 @@ duplicate-tab-lock: removed taking the Web Lock for the remembered replica ID, s
   test pw:e2e/offline.spec.ts:86: FAILED without the guard (Error: expect(received).not.toBe(expected) // Object.is equality); PASSED with it restored
 adoption-lock: removed taking a saved replica's Web Lock before adopting it (SPEC 7.1)
   test pw:e2e/offline.spec.ts:114: FAILED without the guard (Error: expect(received).toEqual(expected) // deep equality); PASSED with it restored
+
+Command: cd server && python tools/guard_checks.py moved-by   (2026-10-17; rebuilds web/ and runs against the compose stack)
+moved-by: removed detecting a lost concurrent move (SPEC 3.5): checkMoves() after each change
+  test pw:e2e/moved.spec.ts: FAILED without the guard (Error: expect(received).toEqual(expected) // deep equality); PASSED with it restored
+

@@ -182,3 +182,40 @@ jobs:
         with:
           name: compose-logs
           path: compose.log
+
+  web:
+    name: web (Playwright, docker compose)
+    needs: [server, client-core]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: client-core
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: stack up
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d --build
+          for port in 7001 7002 7003 8081 8082; do
+            timeout 180 bash -c "until curl -fs localhost:$port/health >/dev/null; do sleep 1; done"
+          done
+      - name: Playwright (board UI, offline exit criterion, moved-by, tabs, 2,000-card render)
+        run: npx playwright test
+        working-directory: web
+      - if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color > compose.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-failure
+          path: |
+            compose.log
+            web/test-results/

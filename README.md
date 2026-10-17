@@ -13,10 +13,13 @@ conformance/vectors/  55 hand-written golden vectors, shared by both cores
 conformance/tools/    build_vectors.py: expands the hand-written vectors and hashes them
 conformance/runner/   differential fuzz: TypeScript generates, Java answers, any mismatch fails
 server/               Phase 2, Java: common, session (board actors), gateway, devtools (dev only)
-client-core/          Phase 2, TypeScript: the headless sync client, e2e tests and drills
+client-core/          Phase 2–3, TypeScript: the headless sync client (and IndexedDB storage), e2e tests and drills
+web/                  Phase 3, React + Vite: the board UI over client-core; Playwright tests in web/e2e
 deploy/               docker-compose.yml (2 gateways, 3 Session instances, Postgres, Redis), drills
 docs/adr/             ADR-000, 000b, 001–004, 006, 007
 docs/walkthrough-phase2.md   one op from a client's send to every other client's view
+docs/walkthrough-phase3.md   one click, from the screen to IndexedDB to the wire to another browser
+docs/trial-guide.md          one page for the people trying it; docs/manual-offline-run.md, the by-hand hour
 ```
 
 ## What it guarantees
@@ -199,3 +202,35 @@ that no edit ends in Unsent edits:
 
 These are single runs on one laptop (Docker Desktop, 20 CPUs, 8 GB VM), not capacity
 numbers; Phase 4 measures latency and throughput properly.
+
+## Phase 3: the product
+
+Sign-in and boards over REST (in the gateway process), the board UI in React on top of
+client-core, IndexedDB storage with one replica per tab, offline editing, Unsent edits,
+history, presence, and in-app bug reports for the trial. Start with
+[`docs/walkthrough-phase3.md`](docs/walkthrough-phase3.md).
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d --build   # the stack (the gateways serve /api too)
+(cd web && npm ci && npx playwright install chromium)
+(cd web && npm run dev)                                     # the app on http://localhost:5173 (proxied to gateway1)
+(cd web && npx playwright test)                             # builds, serves on :4173, runs every browser test
+OFFLINE_HOUR=1 npx playwright test e2e/offline-hour.spec.ts # (in web/) the scripted real-time hour
+CONCORD_ENV=dev java -cp 'server/devtools/build/install/devtools/lib/*' dev.concord.devtools.Dev bug-reports   # testers' reports
+```
+
+### Libraries added in Phase 3
+
+- **React 18, Vite 6, `@vitejs/plugin-react`**: named in the brief.
+- **`@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`**: named in the brief; drag
+  and drop with keyboard support.
+- **Playwright**: named in the brief.
+- **BouncyCastle** (server): argon2id, see Phase 2's list.
+
+### Measured (2026-10-17, this laptop, Chromium 140 headless)
+
+| What | Command | Result |
+|---|---|---|
+| Two browsers, one offline for 200+ edits with a reload, converge, nothing unsent | `cd web && npx playwright test e2e/offline.spec.ts` | 212 offline edits (2 through the UI, the rest through the same client-core calls the UI makes), including 24 card deletes, 29 moves and 14 restores before the reload; converged at board version 302, hash `7ab60ae6…f7a6f3`, 0 unsent on both |
+| 2,000 cards, 10 editors at 1 edit/s each for 60s: render per update (client-core change → React DOM commit, `concord:update` measure) | `cd web && npx playwright test e2e/perf.spec.ts` | three runs: p50 4.7 / 4.8 / 4.7 ms, p95 8.2 / 8.3 / 8.2 ms, p99 10.4 / 10.7 / 11.4 ms, max 12.5 / 12.0 / 13.4 ms; 0 of 611, 612, 610 updates at or over 16ms; long tasks (>50ms) 0, 0, 1 (53ms) |
+| Same, before the Phase 3 performance fixes (for comparison) | same, 20s | p50 56.6 ms, p95 83.9 ms, max 121.1 ms; 200 of 200 over 16ms |

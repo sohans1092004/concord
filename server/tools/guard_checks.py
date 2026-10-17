@@ -115,6 +115,10 @@ CHECKS = {
         "reacting to the browser's offline event (amendment 18)",
         [(CLIENT, "    g.addEventListener?.(\"offline\", this.onOffline);\n", "")],
         "vitest:test/unit/features.test.ts", True),
+    "moved-by": (
+        "detecting a lost concurrent move (SPEC 3.5): checkMoves() after each change",
+        [(CLIENT, "  private changed(): void {\n    this.checkMoves();\n", "  private changed(): void {\n")],
+        "pw:e2e/moved.spec.ts", True),
     "duplicate-tab-lock": (
         "taking the Web Lock for the remembered replica ID, so a duplicated tab makes its own (amendment 17)",
         [(IDB, "let lock = id ? await tryLock(lockName(boardId, id)) : null;", "let lock = id ? { release: () => {} } : null;")],
