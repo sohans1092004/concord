@@ -507,7 +507,7 @@ snapshot (§7).
 | `board:owner:{id}` | `{instance, address, fence}` for gateway lookup | Same as the lease |
 | `board:{id}` (channel) | Committed ops for fan-out | Ephemeral |
 | `membership` (channel) | A board ID whose membership changed; every owner clears that board from its 30s cache (§4.2 step 2) | Ephemeral; a lost message only delays revocation to the 30s TTL |
-| `presence:{id}` (sorted set) | Member = `user:card:state`, score = last seen | Swept every 10s, entries older than 30s removed |
+| `presence:{id}` (sorted set) | Member = `user:card:state` (`-` for no card; `state` is `active` or `idle`), score = last seen. Written only by gateways, never Postgres (§7.5) | Swept every 10s by each gateway serving the board, entries older than 30s removed |
 
 ## 6. Write path and ownership
 
@@ -675,10 +675,20 @@ JSON frames for v1.
 | Server → client | `BOARD_VERSION` | `version` |
 | Server → client | `SYNC` | `ops` or `snapshot`, `version` |
 
+Presence is handled by the gateway alone, in Redis: `PRESENCE` is never forwarded to the
+owner and never stored in Postgres. A client sends `PRESENCE` after `JOINED`, whenever the card
+it has open or its activity changes, and every 10s; `state` is `active`, or `idle` after 60s
+without input. The gateway accepts it only for the connection's joined board, at most 5/s,
+writes `presence:{id}` (removing that connection's previous member) and publishes
+`PRESENCE_UPDATE` on `board:{id}`. After `JOINED` it sends the joining client the current set.
+On disconnect, and when its 10s sweep removes entries older than 30s, it publishes
+`state: "left"` for each user with no fresh entry left. Several gateways may sweep the same
+board, so a client treats `left` idempotently. If Redis is down, presence is absent.
+
 Each entry of `ops` in `JOINED` and `SYNC` is `{op, version, user_id}`: `user_id` is the user
 who sent the op (`board_ops.user_id`; the nil UUID for the owner's own rebalancing ops), so a
 client can name who made a change, for example "moved by {name}" (§3.5).
-| Server → client | `PRESENCE_UPDATE` | `user_id`, `card_id`, `state` |
+| Server → client | `PRESENCE_UPDATE` | `user_id`, `card_id`, `state` (`active`, `idle` or `left`) |
 | Server → client | `RECONNECT_ELSEWHERE` | sent before a gateway drains |
 | Server → client | `ERROR` | `code`, `op_id`, `detail`, and `server_time_ms` for `CLOCK_SKEW` |
 
@@ -996,3 +1006,4 @@ section text itself is updated in the same commit.
 | 13 | 2026-10-17 | §6.2 | A renewal that finds the lease gone re-takes it only if `boards.fence` still equals its fence; otherwise it drops the board (`FencingTest.staleOwnerDoesNotRetakeAWipedLease`, guard check `retake-fence-check`). |
 | 14 | 2026-10-17 | §5.1, §9.4 | Sign-in as in Reliant, no JWTs: hashed 30-day session cookie (or Bearer for scripts), argon2id, per-email and per-IP sign-in limits, optional invite code; changing the password revokes other sessions; Origin checked on every state-changing REST call. The WebSocket URL carries a single-use 30s ticket stored hashed in Postgres; expired tickets and sessions are deleted every minute. `users.name`, `sessions`, `ws_tickets` and `bug_reports` added to §5.1. The JWT code, config and secret are deleted. |
 | 15 | 2026-10-17 | §7.5 | `OP_BROADCAST` and each `ops` entry of `JOINED` and `SYNC` carry the sender's `user_id`; `JOINED` carries the board's member map, `user_id` → `{name, role}`. |
+| 16 | 2026-10-17 | §5.2, §7.5 | Presence specified: `state` is `active` or `idle`; client sends on join, on change and every 10s; gateway-only, in Redis, never Postgres; snapshot after `JOINED`; `left` on disconnect and from each gateway's 10s sweep, idempotent on the client (`PresenceTest`, guard checks `presence-sweep`, `presence-joined-board`). |

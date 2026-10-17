@@ -53,3 +53,9 @@ exit 0
 Command: cd server && python tools/guard_checks.py equal-key-rekey   (2026-10-17)
 equal-key-rekey: removed re-keying equal upper neighbours before an insert (SPEC 3.7 rule B)
   test vitest:test/unit/features.test.ts: FAILED without the guard (AssertionError: expected [ 'ADD_CARD' ] to deeply equal [ 'SET_PLACEMENT', 'ADD_CARD' ]); PASSED with it restored
+
+Command: cd server && python tools/guard_checks.py presence-sweep presence-joined-board   (2026-10-17)
+presence-sweep: removed removing presence entries older than 30s in the sweep (SPEC 5.2)
+  test sweepRemovesStaleEntriesAndAnnouncesOnlyUsersWhoAreGone: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <[f267e32f-4e82-4fe5-8548-d4332a657a8c:-:idle]> but was: <[b9cd24f8-0f68-4481-8017-f5c24eefaeb4:-:active, f267e32f-4e82-4fe5-8548-d4332a657a8c:-:active, ); PASSED with it restored
+presence-joined-board: removed the check that a PRESENCE frame names the connection's joined board
+  test presenceFlowsWithTheGatewaysPostgresCutOffAndStaysOnItsBoard: FAILED without the guard (java.lang.AssertionError: no matching message within 10s); PASSED with it restored

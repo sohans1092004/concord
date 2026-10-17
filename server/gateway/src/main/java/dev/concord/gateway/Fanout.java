@@ -134,6 +134,11 @@ final class Fanout implements AutoCloseable {
         });
     }
 
+    /** Boards with at least one client on this gateway. */
+    List<String> boards() {
+        return List.copyOf(clients.keySet());
+    }
+
     int clientCount() {
         return clients.values().stream().mapToInt(Map::size).sum();
     }

@@ -39,10 +39,16 @@ final class ClientConn {
     private final BlockingQueue<Map<?, ?>> inbox = new LinkedBlockingQueue<>(INBOX_LIMIT);
     private final Outbox outbox;
     private final Thread worker;
+    private final Presence presence;
+    /** PRESENCE frames: 5/s, burst 10. They only touch Redis, but a flood would still hammer it. */
+    private final TokenBucket presenceBucket;
     private volatile String board;
+    private volatile boolean joined;
 
-    ClientConn(String userId, WsContext ctx, Router router, Fanout fanout, LongSupplier clock, Outbox outbox) {
+    ClientConn(String userId, WsContext ctx, Router router, Fanout fanout, LongSupplier clock, Outbox outbox, Presence presence) {
         this.outbox = outbox;
+        this.presence = presence;
+        this.presenceBucket = new TokenBucket(5, 10, clock.getAsLong());
         this.userId = userId;
         this.ctx = ctx;
         this.router = router;
@@ -98,9 +104,25 @@ final class ClientConn {
                 if (!bucket.take(clock.getAsLong())) send(Msg.error(Msg.RETRY_LATER, opIdOf(f), "rate limited: 20 ops/s, burst 50"));
                 else if (!inbox.offer(f)) send(Msg.error(Msg.RETRY_LATER, opIdOf(f), "too many requests in flight"));
             }
-            case "PRESENCE" -> {} // Phase 3
+            case "PRESENCE" -> presence(f);
             default -> send(Msg.error(Msg.INVALID_OP, null, "unknown message type"));
         }
+    }
+
+    /** SPEC §7.5 PRESENCE, handled here and in Redis only: never forwarded to the owner, never stored. */
+    private void presence(Map<?, ?> f) {
+        String b = board;
+        if (!joined || b == null || !b.equals(f.get("board_id"))) {
+            send(Msg.error(Msg.INVALID_OP, null, "PRESENCE needs a joined board"));
+            return;
+        }
+        Object card = f.get("card_id"), state = f.get("state");
+        if (!(card == null || (card instanceof String c && Hlc.isUuid(c))) || !("active".equals(state) || "idle".equals(state))) {
+            send(Msg.error(Msg.INVALID_OP, null, "PRESENCE needs card_id (a UUID or null) and state active or idle"));
+            return;
+        }
+        if (!presenceBucket.take(clock.getAsLong())) return; // dropped: the next heartbeat repeats it
+        presence.update(b, this, userId, (String) card, (String) state);
     }
 
     private static String opIdOf(Map<?, ?> f) {
@@ -139,6 +161,10 @@ final class ClientConn {
             board = null;
         }
         send(r);
+        if ("JOINED".equals(r.get("type"))) {
+            joined = true;
+            for (Map<String, Object> p : presence.snapshot(b)) send(p); // who is here already
+        }
     }
 
     private void op(Map<?, ?> f) {
@@ -172,6 +198,7 @@ final class ClientConn {
 
     void onClose() {
         worker.interrupt();
+        presence.leave(this);
         String b = board;
         if (b != null) fanout.leave(b, this);
     }

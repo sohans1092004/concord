@@ -26,6 +26,11 @@ public final class RedisKeys {
         return "board:owner:" + board;
     }
 
+    /** Presence of a board's users (SPEC §5.2): member user:card:state, score = last seen. */
+    public static String presence(String board) {
+        return "presence:" + board;
+    }
+
     public static String channel(String board) {
         return "board:" + board;
     }

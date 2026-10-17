@@ -32,6 +32,7 @@ public final class GatewayMain implements AutoCloseable {
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("cleanup").daemon().factory());
     private final Router router;
     private final Fanout fanout;
+    private final Presence presence;
     private final Javalin app;
     private final Map<String, ClientConn> conns = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong slowConsumerCloses = new java.util.concurrent.atomic.AtomicLong();
@@ -44,6 +45,8 @@ public final class GatewayMain implements AutoCloseable {
         db = Db.pool(config);
         router = new Router(redis.conn.sync(), System::currentTimeMillis, config.internalSecret());
         fanout = new Fanout(redis.pubSub(), router);
+        presence = new Presence(redis.conn.sync(), System::currentTimeMillis);
+        cleaner.scheduleWithFixedDelay(() -> presence.sweep(fanout.boards()), Presence.SWEEP_MS, Presence.SWEEP_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
         app = Javalin.create(cfg -> {
             cfg.useVirtualThreads = true;
             cfg.showJavalinBanner = false;
@@ -91,7 +94,7 @@ public final class GatewayMain implements AutoCloseable {
                     slowConsumerCloses.incrementAndGet();
                     log.atWarn().addKeyValue("user_id", user).log("slow consumer: backlog over the limit, disconnecting");
                 }, outboxPeak);
-                conns.put(ctx.sessionId(), new ClientConn(user, ctx, router, fanout, System::currentTimeMillis, outbox));
+                conns.put(ctx.sessionId(), new ClientConn(user, ctx, router, fanout, System::currentTimeMillis, outbox, presence));
                 log.atInfo().addKeyValue("user_id", user).log("client connected");
             });
             ws.onMessage(ctx -> {

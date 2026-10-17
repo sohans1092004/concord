@@ -18,6 +18,8 @@ STORE = "session/src/main/java/dev/concord/session/Store.java"
 OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
 API = "gateway/src/main/java/dev/concord/gateway/Api.java"
 ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
+PRESENCE = "gateway/src/main/java/dev/concord/gateway/Presence.java"
+CLIENTCONN = "gateway/src/main/java/dev/concord/gateway/ClientConn.java"
 CLIENT = "../client-core/src/client.ts"
 IDB = "../client-core/src/idb.ts"
 
@@ -92,6 +94,14 @@ CHECKS = {
         "redacting ticket= and session values in log lines (only access_token= left)",
         [(ENCODER, "\"((?:ticket|access_token|concord_session)=|Bearer )", "\"((?:access_token)=)")],
         "dev.concord.gateway.GatewayLogTest.tokensNeverReachTheLogs", True),
+    "presence-sweep": (
+        "removing presence entries older than 30s in the sweep (SPEC 5.2)",
+        [(PRESENCE, "                redis.zremrangebyscore(key(board), Range.create(Double.NEGATIVE_INFINITY, (double) cutoff));\n", "")],
+        "dev.concord.gateway.PresenceTest.sweepRemovesStaleEntriesAndAnnouncesOnlyUsersWhoAreGone", True),
+    "presence-joined-board": (
+        "the check that a PRESENCE frame names the connection's joined board",
+        [(CLIENTCONN, "if (!joined || b == null || !b.equals(f.get(\"board_id\"))) {", "if (!joined || b == null) {")],
+        "dev.concord.gateway.PresenceTest.presenceFlowsWithTheGatewaysPostgresCutOffAndStaysOnItsBoard", True),
     # Phase 3, client: vitest (client-core) and Playwright (web) checks.
     "equal-key-rekey": (
         "re-keying equal upper neighbours before an insert (SPEC 3.7 rule B)",
