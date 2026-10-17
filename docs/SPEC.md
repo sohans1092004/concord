@@ -523,7 +523,7 @@ snapshot (§7).
 | `board:owner:{id}` | `{instance, address, fence}` for gateway lookup | Same as the lease |
 | `board:{id}` (channel) | Committed ops for fan-out | Ephemeral |
 | `membership` (channel) | A board ID whose membership changed; every owner clears that board from its 30s cache (§4.2 step 2) | Ephemeral; a lost message only delays revocation to the 30s TTL |
-| `presence:{id}` (sorted set) | Member = `user:card:state` (`-` for no card; `state` is `active` or `idle`), score = last seen. Written only by gateways, never Postgres (§7.5) | Swept every 10s by each gateway serving the board, entries older than 30s removed |
+| `presence:{id}` (sorted set) | One member per connection: `user:connection:card:state` (`-` for no card; `state` is `active` or `idle`), score = last seen. Written only by gateways, never Postgres (§7.5) | Swept every 10s by each gateway serving the board, entries older than 30s removed |
 
 ## 6. Write path and ownership
 
@@ -661,6 +661,16 @@ never discards an unacknowledged edit, whatever the server sends back.
 3. Update the view.
 4. If connected, send it. If not, it waits.
 
+Steps 2–4 run in this order for every edit, one edit at a time (amendment 21). Step 2 appends
+only that op, to an append-only log store; it is shown and sent only once the append has
+committed. Until then the op is staged: later edits are computed against it (keys, observed
+tags) but it is not rendered. Everything else (the confirmed replica, ACKs, Unsent edits) is
+saved as a coalesced snapshot at most about once a second and on `pagehide`; a snapshot
+records the last log entry it includes and removes those entries in the same transaction. On
+load, a replica is its snapshot plus the log entries after it, and the HLC is moved past every
+logged op of this replica, so a tick is never reused. A tab that crashes the moment an edit is
+on screen loses nothing (`offline.spec.ts`, guard check `append-before-view`).
+
 ### 7.3 Reconnect
 
 1. Reconnect with backoff: 0.5s × 2, capped at 30s, full jitter. A joined connection that
@@ -711,13 +721,15 @@ without input. The gateway accepts it only for the connection's joined board, at
 writes `presence:{id}` (removing that connection's previous member) and publishes
 `PRESENCE_UPDATE` on `board:{id}`. After `JOINED` it sends the joining client the current set.
 On disconnect, and when its 10s sweep removes entries older than 30s, it publishes
-`state: "left"` for each user with no fresh entry left. Several gateways may sweep the same
-board, so a client treats `left` idempotently. If Redis is down, presence is absent.
+`state: "left"` for that one connection (amendment 22). A client keeps presence per
+connection and shows a user while any of their connections is present. Several gateways may
+sweep the same board, so a client treats `left` idempotently. If Redis is down, presence is
+absent.
 
 Each entry of `ops` in `JOINED` and `SYNC` is `{op, version, user_id}`: `user_id` is the user
 who sent the op (`board_ops.user_id`; the nil UUID for the owner's own rebalancing ops), so a
 client can name who made a change, for example "moved by {name}" (§3.5).
-| Server → client | `PRESENCE_UPDATE` | `user_id`, `card_id`, `state` (`active`, `idle` or `left`) |
+| Server → client | `PRESENCE_UPDATE` | `user_id`, `connection_id`, `card_id`, `state` (`active`, `idle` or `left`) |
 | Server → client | `RECONNECT_ELSEWHERE` | sent before a gateway drains |
 | Server → client | `ERROR` | `code`, `op_id`, `detail`, and `server_time_ms` for `CLOCK_SKEW` |
 
@@ -970,7 +982,11 @@ already; say so in interviews rather than build them twice.
 
 ### 10.1 Measurements
 
-All on one machine, reported like Reliant's: where the bottlenecks sit, not capacity.
+All on one machine, reported like Reliant's: where the bottlenecks sit, not capacity. The
+measuring machine is the development laptop; targets are judged there. CI's shared runners
+(which also host the whole stack and the load generators) run the same tests as regression
+guards with looser bounds and record their numbers: for "Large board", every update under
+16ms on the laptop, p95 under 25ms in CI (`web/e2e/perf.spec.ts`).
 
 | Test | Setup | Pass |
 |---|---|---|
@@ -1039,3 +1055,7 @@ section text itself is updated in the same commit.
 | 17 | 2026-10-17 | §7.1 | Tab replicas: replica ID in `sessionStorage`, held by a Web Lock; a duplicated tab whose stored ID is locked makes a new one (`offline.spec.ts`, guard check `duplicate-tab-lock`). Adoption takes the record's lock first and is one IndexedDB transaction (guard check `adoption-lock`). A service worker caches the app shell for offline reloads. |
 | 18 | 2026-10-17 | §7.3 | Liveness: 15s with no message drops a joined connection and reconnects; the browser's `offline` event drops it at once and `online` reconnects without backoff. Found by the Phase 3 offline test: Chromium's offline mode, like a dropped network, leaves the WebSocket open (guard checks `silence-drop`, `offline-event`). |
 | 19 | 2026-10-17 | §2.1 | REST endpoints listed; approved defaults: members readable by any member, managed by owners, at least one owner kept, 404 for non-members; history 30 days, paged by version; in-app bug reports. The web app remembers who is signed in (no secret) in `localStorage`, so a new tab opens offline too. |
+| 20 | 2026-10-17 | §10.1 | The development laptop is the measuring machine; targets are judged there. CI runs the same tests as regression guards with looser bounds and records the numbers: the 2,000-card render test requires every update under 16ms locally and p95 under 25ms in CI. |
+| 21 | 2026-10-17 | §7.1, §7.2 | §7.2's order is enforced: each edit's op is appended to an append-only IndexedDB log and committed before it is shown or sent; snapshots are coalesced (about 1s, and on `pagehide`) and replace the log entries they include; load merges snapshot and log and moves the HLC past logged ops. Edit-to-screen p50 4.1–4.3ms after, 4.9–5.0ms before (`web/e2e/latency.spec.ts`). |
+| 22 | 2026-10-17 | §5.2, §7.5 | Presence per connection: member `user:connection:card:state`, `PRESENCE_UPDATE` carries `connection_id`, `left` removes one connection; a user is shown while any of their connections is present (`board.spec.ts` two-tab test, guard check `presence-per-connection`). |
+| 23 | 2026-10-17 | §9.4 (Phase 4) | Approved for Phase 4: the gateway trusts `X-Forwarded-For` only from configured proxy addresses, for the per-IP sign-in limit. Until then it uses the socket address. |

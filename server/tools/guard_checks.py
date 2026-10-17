@@ -96,8 +96,8 @@ CHECKS = {
         "dev.concord.gateway.GatewayLogTest.tokensNeverReachTheLogs", True),
     "presence-sweep": (
         "removing presence entries older than 30s in the sweep (SPEC 5.2)",
-        [(PRESENCE, "                redis.zremrangebyscore(key(board), Range.create(Double.NEGATIVE_INFINITY, (double) cutoff));\n", "")],
-        "dev.concord.gateway.PresenceTest.sweepRemovesStaleEntriesAndAnnouncesOnlyUsersWhoAreGone", True),
+        [(PRESENCE, "                redis.zremrangebyscore(key(board), old);\n", "")],
+        "dev.concord.gateway.PresenceTest.sweepRemovesStaleEntriesAndAnnouncesEachConnectionThatWent", True),
     "presence-joined-board": (
         "the check that a PRESENCE frame names the connection's joined board",
         [(CLIENTCONN, "if (!joined || b == null || !b.equals(f.get(\"board_id\"))) {", "if (!joined || b == null) {")],
@@ -119,6 +119,14 @@ CHECKS = {
         "detecting a lost concurrent move (SPEC 3.5): checkMoves() after each change",
         [(CLIENT, "  private changed(): void {\n    this.checkMoves();\n", "  private changed(): void {\n")],
         "pw:e2e/moved.spec.ts", True),
+    "append-before-view": (
+        "appending each edit durably before it is shown (SPEC 7.2, amendment 21): the edit then rests on the coalesced snapshot",
+        [(CLIENT, "        const r = this.storage.append(op, seq);", "        const r = undefined as Promise<void> | void;")],
+        "pw:e2e/offline.spec.ts:186", True),
+    "presence-per-connection": (
+        "keying presence by connection on the client, so one tab's 'left' removes only that tab (amendment 22)",
+        [(CLIENT, "const conn = String(m.connection_id ?? m.user_id);", "const conn = String(m.user_id);")],
+        "pw:e2e/board.spec.ts:193", True),
     "duplicate-tab-lock": (
         "taking the Web Lock for the remembered replica ID, so a duplicated tab makes its own (amendment 17)",
         [(IDB, "let lock = id ? await tryLock(lockName(boardId, id)) : null;", "let lock = id ? { release: () => {} } : null;")],

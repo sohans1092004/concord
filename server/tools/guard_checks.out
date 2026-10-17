@@ -74,3 +74,13 @@ Command: cd server && python tools/guard_checks.py moved-by   (2026-10-17; rebui
 moved-by: removed detecting a lost concurrent move (SPEC 3.5): checkMoves() after each change
   test pw:e2e/moved.spec.ts: FAILED without the guard (Error: expect(received).toEqual(expected) // deep equality); PASSED with it restored
 
+
+Command: cd server && python tools/guard_checks.py append-before-view   (2026-10-17; the test takes the on-disk state the moment the edit is on screen into a new context: a crash)
+append-before-view: removed appending each edit durably before it is shown (SPEC 7.2, amendment 21): the edit then rests on the coalesced snapshot
+  test pw:e2e/offline.spec.ts:186: FAILED without the guard (Error: expect(locator).toBeVisible() failed); PASSED with it restored
+
+Command: cd server && python tools/guard_checks.py presence-per-connection presence-sweep   (2026-10-17, amendment 22)
+presence-per-connection: removed keying presence by connection on the client, so one tab's 'left' removes only that tab (amendment 22)
+  test pw:e2e/board.spec.ts:193: FAILED without the guard (Error: expect(locator).toHaveText(expected) failed); PASSED with it restored
+presence-sweep: removed removing presence entries older than 30s in the sweep (SPEC 5.2)
+  test sweepRemovesStaleEntriesAndAnnouncesEachConnectionThatWent: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <[6c877856-a68a-470c-bc42-8c111838f1ff:conn-3:-:idle]> but was: <[48e792e6-19ce-41f2-863c-e9b5ac331ac7:conn-1:-:active, 6c877856-a68a-470c-bc42-8c111838f); PASSED with it restored

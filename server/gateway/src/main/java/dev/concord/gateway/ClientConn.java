@@ -44,6 +44,8 @@ final class ClientConn {
     private final TokenBucket presenceBucket;
     private volatile String board;
     private volatile boolean joined;
+    /** Names this connection in presence (amendment 22): a user may have several. */
+    final String connectionId = java.util.UUID.randomUUID().toString();
 
     ClientConn(String userId, WsContext ctx, Router router, Fanout fanout, LongSupplier clock, Outbox outbox, Presence presence) {
         this.outbox = outbox;
@@ -122,7 +124,7 @@ final class ClientConn {
             return;
         }
         if (!presenceBucket.take(clock.getAsLong())) return; // dropped: the next heartbeat repeats it
-        presence.update(b, this, userId, (String) card, (String) state);
+        presence.update(b, connectionId, userId, (String) card, (String) state);
     }
 
     private static String opIdOf(Map<?, ?> f) {
@@ -198,7 +200,7 @@ final class ClientConn {
 
     void onClose() {
         worker.interrupt();
-        presence.leave(this);
+        presence.leave(connectionId);
         String b = board;
         if (b != null) fanout.leave(b, this);
     }

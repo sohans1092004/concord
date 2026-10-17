@@ -47,7 +47,11 @@ class PresenceTest {
                 String card = Ops.uuid();
                 a.send(Msg.obj("type", "PRESENCE", "board_id", b.id(), "card_id", card, "state", "active"));
                 Map<String, Object> seen = c.next(m -> "PRESENCE_UPDATE".equals(m.get("type")));
-                assertEquals(Msg.obj("type", "PRESENCE_UPDATE", "user_id", b.users().get(0).get("id"), "card_id", card, "state", "active"), seen);
+                assertEquals(b.users().get(0).get("id"), seen.get("user_id"));
+                assertEquals(card, seen.get("card_id"));
+                assertEquals("active", seen.get("state"));
+                String aConnection = (String) seen.get("connection_id");
+                assertTrue(aConnection != null && !aConnection.isEmpty(), "each update names its connection");
 
                 // A client joining later is told who is already here.
                 assertEquals("JOINED", late.join(b.id(), null).get("type"));
@@ -62,6 +66,7 @@ class PresenceTest {
                 a.close(); // disconnect: c hears that a left
                 Map<String, Object> left = c.next(m -> "PRESENCE_UPDATE".equals(m.get("type")) && "left".equals(m.get("state")));
                 assertEquals(b.users().get(0).get("id"), left.get("user_id"));
+                assertEquals(aConnection, left.get("connection_id"), "left names the connection that went");
                 Thread.sleep(300);
                 assertTrue(elsewhere.inbox.stream().noneMatch(m -> "PRESENCE_UPDATE".equals(m.get("type"))), "presence never crosses boards");
             } finally {
@@ -70,9 +75,9 @@ class PresenceTest {
         }
     }
 
-    /** The sweep removes entries older than 30s and announces users with none left. */
+    /** The sweep removes entries older than 30s and announces each removed connection as left (amendment 22). */
     @Test
-    void sweepRemovesStaleEntriesAndAnnouncesOnlyUsersWhoAreGone() throws Exception {
+    void sweepRemovesStaleEntriesAndAnnouncesEachConnectionThatWent() throws Exception {
         String board = Ops.uuid(), gone = Ops.uuid(), stays = Ops.uuid();
         AtomicLong now = new AtomicLong(1_000_000_000L);
         var heard = new LinkedBlockingQueue<Map<?, ?>>();
@@ -92,14 +97,16 @@ class PresenceTest {
             now.addAndGet(11_000); // the first two are now 31s old
             heard.clear();
             p.sweep(List.of(board));
-            assertEquals(List.of(stays + ":-:idle"), redis.conn.sync().zrange(RedisKeys.presence(board), 0, -1));
+            assertEquals(List.of(stays + ":conn-3:-:idle"), redis.conn.sync().zrange(RedisKeys.presence(board), 0, -1));
             // Pub/Sub delivers asynchronously, so the updates above may still arrive: read only "left".
             List<Map<?, ?>> lefts = new java.util.ArrayList<>();
             long until = System.currentTimeMillis() + 2_000;
             for (Map<?, ?> m; System.currentTimeMillis() < until; )
                 if ((m = heard.poll(100, TimeUnit.MILLISECONDS)) != null && "left".equals(m.get("state"))) lefts.add(withoutNull(m));
-            assertEquals(List.of(Map.of("type", "PRESENCE_UPDATE", "user_id", gone, "state", "left")), lefts,
-                    "exactly the user with no fresh entry is announced as left");
+            assertEquals(java.util.Set.of(Map.of("type", "PRESENCE_UPDATE", "user_id", gone, "connection_id", "conn-1", "state", "left"),
+                    Map.of("type", "PRESENCE_UPDATE", "user_id", stays, "connection_id", "conn-2", "state", "left")), java.util.Set.copyOf(lefts),
+                    "each stale connection is announced as left, and only those; conn-3 of the same user stays");
+            assertEquals(2, lefts.size());
         }
     }
 
