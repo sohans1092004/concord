@@ -94,12 +94,21 @@ public final class Infra {
         return new Redis(redisUrl());
     }
 
+    /**
+     * A port to bind later, below the OS ephemeral range (Linux 32768+, Windows 49152+). Port 0
+     * would come from that range, which Docker also uses for Testcontainers' mapped ports, so it
+     * could be taken between this check and the bind (CI on d1e9ae3: port 32799 already in use).
+     */
     public static int freePort() {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        for (int attempt = 0; attempt < 200; attempt++) {
+            int port = 20_000 + java.util.concurrent.ThreadLocalRandom.current().nextInt(12_000);
+            try (ServerSocket s = new ServerSocket(port)) {
+                return s.getLocalPort();
+            } catch (IOException e) {
+                // taken: try another
+            }
         }
+        throw new UncheckedIOException(new IOException("no free port in 20000-31999"));
     }
 
     /** Config for an in-process service. {@code viaProxy}: reach Postgres through Toxiproxy. */

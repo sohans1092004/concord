@@ -37,8 +37,8 @@ class ApiTest {
 
     @AfterAll
     static void down() {
-        g.close();
-        s.close();
+        if (g != null) g.close(); // null when the gateway failed to start: still stop the session
+        if (s != null) s.close();
     }
 
     /** SPEC §9.4: a ticket opens one WebSocket, once, within 30s. Real time, no clock tricks. */

@@ -36,6 +36,8 @@ subprojects {
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
         maxHeapSize = "1g"
+        // A hung test fails with its name and stack trace instead of silently using up the CI job.
+        systemProperty("junit.jupiter.execution.timeout.default", "5m")
         testLogging {
             events("failed")
             showStandardStreams = System.getenv("TEST_STDOUT") != null
