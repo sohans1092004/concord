@@ -1,0 +1,9 @@
+# The memory soak against production's exact services, JVM flags and memory limits
+# (deploy/prod/compose.yaml), on this machine. Only Caddy changes: plain HTTP on 127.0.0.1:8088
+# instead of Let's Encrypt on 80/443. Run as its own project, with deploy/prod/.env:
+#   docker compose -p concord-soak -f deploy/prod/compose.yaml -f deploy/soak/compose.soak.yaml up -d --build --wait
+services:
+  caddy:
+    ports: !override ["127.0.0.1:8088:80"]
+    environment:
+      CADDY_SITE: ":80"

@@ -38,6 +38,10 @@ class StateGrowthTest {
                 setup.add(h.ops.addCard(c, listId, "a" + (i % 9 + 1), "card " + i));
             }
             pump(h, setup);
+            // The Probe keeps every broadcast it hears; in this JVM that would be measured as the
+            // board's growth (a first run read ~2.7 KB per op from exactly that). Stop it listening.
+            h.probe.unsubscribe();
+            h.probe.channel.clear();
             long h0 = heap(), s0 = snapshotBytes(h);
 
             pump(h, edits(h, cards, listId, 10_000, 0));

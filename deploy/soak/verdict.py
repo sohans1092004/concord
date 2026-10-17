@@ -10,7 +10,8 @@ import json
 import sys
 
 rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-jvms = [k for k in rows[0] if k.startswith("deploy-")]
+# JVM keys are the integer heap samples: deploy-* (dev stack) or <project>-gateway-1 etc. (prod)
+jvms = [k for k, v in rows[0].items() if isinstance(v, int) and k not in ("minute", "edits", "connections", "slow", "errors")]
 late = [r for r in rows if r["minute"] >= 60]
 if len(late) < 3:
     sys.exit(f"only {len(late)} samples from minute 60 on; the soak must run at least 70 minutes")

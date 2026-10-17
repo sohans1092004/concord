@@ -186,6 +186,12 @@ board nobody has open (amendment 26):
   - when Redis cannot say how many subscribers there are.
 - Checked at most every 30s once the idle time has passed. A request racing the close is
   answered `NOT_OWNER`, as in any handover, and is resent.
+- **Measured growth while loaded** (`StateGrowthTest`, 3 runs, `deploy/soak/results.txt`):
+  - about 163 B per op until the board's ACK cache is full (10,000 ops, so at most about 1.6 MB);
+  - about 0 B per edit of existing cards after that;
+  - about 3.0 KB of heap (534 B of snapshot) per deleted card, kept for the board's life.
+  - So a board used daily for 30 days, assuming 500 ops a day of which 50 delete a card, holds
+    about 6 MB while loaded.
 
 ## 3. CRDT design
 
