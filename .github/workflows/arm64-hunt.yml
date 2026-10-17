@@ -1,6 +1,6 @@
 name: arm64-hunt
 
-# Temporary (Phase 4a): the gateway tests on arm64, six at once, with per-test logging and a
+# Temporary (Phase 4a): the server test suite on arm64, six at once, with per-test logging and a
 # thread dump after 8 minutes, to catch the hang seen on 92844f3 and 790a65b. Deleted once found.
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   gateway-tests:
-    name: gateway tests on arm64 (${{ matrix.n }})
+    name: server tests on arm64 (${{ matrix.n }})
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     strategy:
@@ -30,10 +30,10 @@ jobs:
       - run: |
           ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; done ) &
           dog=$!
-          ./gradlew :gateway:test; status=$?
+          ./gradlew test; status=$?
           kill $dog 2>/dev/null; exit $status
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gateway-reports-${{ matrix.n }}
-          path: server/gateway/build/reports/tests/
+          path: server/*/build/reports/tests/
