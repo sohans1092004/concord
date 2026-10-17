@@ -20,7 +20,7 @@
 // its dependency committed (the owner died between them), so it is deferred and resent once
 // everything ahead of it is ACKed. If it is still invalid then, it goes to Unsent edits.
 
-import { Board, hlc as H, keys, op as O, type Hlc, type Op, type View } from "@concord/crdt";
+import { Board, compareUtf8, hlc as H, keys, op as O, type Hlc, type Op, type Placement, type View } from "@concord/crdt";
 import { MemoryStorage, type Saved, type Storage, type Unsent } from "./storage.js";
 
 const NIL = O.NIL_UUID;
@@ -28,6 +28,50 @@ type Msg = Record<string, unknown>;
 type Body = Record<string, unknown>;
 
 export type Status = "connecting" | "joined" | "offline" | "unauthorized" | "closed";
+
+/** A board member, from JOINED (§7.5). */
+export interface Member {
+  readonly name: string;
+  readonly role: string;
+}
+
+/** Someone else's view of the board (§7.5 PRESENCE_UPDATE). */
+export interface Presence {
+  readonly cardId: string | null;
+  readonly state: "active" | "idle";
+}
+
+/** A concurrent move of ours that lost (§3.5): shown briefly as "moved by {name}". */
+export interface MovedBy {
+  readonly userId: string | null;
+  readonly at: number;
+}
+
+/** A deleted list or card, for the trash view; restoring it is an ordinary RESTORE_* op. */
+export interface Trashed {
+  readonly kind: "list" | "card";
+  readonly id: string;
+  readonly title: string;
+  readonly listId: string | null;
+}
+
+/** How long a lost move stays marked, and how long after its ACK a move of ours can still lose. */
+export const MOVED_BY_MS = 4_000;
+export const MOVE_WATCH_MS = 30_000;
+/** §5.2: presence entries older than 30s are swept, so a client refreshes its own every 10s. */
+export const PRESENCE_EVERY_MS = 10_000;
+
+/**
+ * Labels as the user typed them, made valid for §4.2: trimmed, NFC, empty ones dropped,
+ * duplicates removed, sorted by unsigned UTF-8 bytes. Throws if more than 20 remain or one is
+ * longer than 50 code points, so the caller can say so instead of sending an invalid op.
+ */
+export function normalizeLabels(input: readonly string[]): string[] {
+  const out = [...new Set(input.map((l) => l.trim().normalize("NFC")).filter((l) => l.length > 0))].sort(compareUtf8);
+  if (out.length > O.MAX_LABELS) throw new Error(`at most ${O.MAX_LABELS} labels`);
+  for (const l of out) if ([...l].length > O.MAX_LABEL) throw new Error(`a label is at most ${O.MAX_LABEL} characters: ${l}`);
+  return out;
+}
 
 /** The part of the WebSocket API the client uses, so tests and Phase 3 can supply their own. */
 export interface Socket {
@@ -90,6 +134,15 @@ export class SyncClient {
   private viewCache: Board | null = null;
   private readonly listeners = new Set<() => void>();
   private saving: Promise<void> = Promise.resolve();
+  private members_ = new Map<string, Member>();
+  /** Which user each replica belongs to, learnt from ops that carry user_id (§7.5). */
+  private readonly replicaUser = new Map<string, string>();
+  /** Our recent moves (§3.5): card → the placement we chose and when it was ACKed (null: pending). */
+  private readonly localMoves = new Map<string, { op_id: string; placement: Placement; ackedAt: number | null }>();
+  private readonly movedBy_ = new Map<string, MovedBy>();
+  private readonly presence_ = new Map<string, Presence>();
+  private myPresence: { cardId: string | null; state: "active" | "idle" } | null = null;
+  private presenceTimer: ReturnType<typeof setInterval> | null = null;
 
   private readonly storage: Storage;
   private readonly connectFn: (url: string) => Socket;
@@ -104,6 +157,7 @@ export class SyncClient {
     this.random = opts.random ?? Math.random;
     this.logFn = opts.log ?? (() => {});
     this.urlIndex = Math.floor(this.random() * opts.urls.length);
+    this.replicaId = this.storage.replicaId ?? this.replicaId;
     this.clock = H.zero(this.replicaId);
   }
 
@@ -127,8 +181,47 @@ export class SyncClient {
     return this.version;
   }
 
+  /** This client's current replica ID (§7.1: one per tab). */
+  get replica(): string {
+    return this.replicaId;
+  }
+
   get boardRole(): string | null {
     return this.role;
+  }
+
+  /** Board members by user ID, from the last JOINED. */
+  members(): ReadonlyMap<string, Member> {
+    return this.members_;
+  }
+
+  /** Cards whose concurrent move by this client lost in the last few seconds (§3.5). */
+  movedBy(): ReadonlyMap<string, MovedBy> {
+    const now = this.now();
+    for (const [id, m] of this.movedBy_) if (now - m.at > MOVED_BY_MS) this.movedBy_.delete(id);
+    return this.movedBy_;
+  }
+
+  /** Other users on the board: user ID → which card they have open (§1.1). */
+  presence(): ReadonlyMap<string, Presence> {
+    return this.presence_;
+  }
+
+  /** Deleted lists and cards, newest state first by title; restore with restoreList/restoreCard. */
+  trash(): Trashed[] {
+    const s = this.viewBoard().encode();
+    const out: Trashed[] = [];
+    const reg = s.registers as Record<string, Record<string, { value: unknown }>>;
+    for (const kind of ["list", "card"] as const) {
+      const set = kind === "list" ? s.lists : s.cards;
+      for (const [id, tags] of Object.entries(set.adds)) {
+        const dead = new Set(set.tombstones[id] ?? []);
+        if (tags.some((t) => !dead.has(t))) continue;
+        const placement = reg[id]?.placement?.value as { list_id?: string } | undefined;
+        out.push({ kind, id, title: String(reg[id]?.title?.value ?? ""), listId: placement?.list_id ?? null });
+      }
+    }
+    return out.sort((a, b) => compareUtf8(a.title, b.title) || compareUtf8(a.id, b.id));
   }
 
   pendingOps(): readonly Op[] {
@@ -201,7 +294,19 @@ export class SyncClient {
   moveCard(cardId: string, listId: string, index: number): void {
     const cards = this.cardsOf(listId).filter((c) => c.id !== cardId);
     const key = this.placeAt(cards, Math.min(index, cards.length), (id, k) => ({ type: "SET_PLACEMENT", entity_id: id, placement: { list_id: listId, position_key: k } }));
-    this.submit({ type: "SET_PLACEMENT", entity_id: cardId, placement: { list_id: listId, position_key: key } });
+    const op = this.submit({ type: "SET_PLACEMENT", entity_id: cardId, placement: { list_id: listId, position_key: key } });
+    this.localMoves.set(cardId, { op_id: op.op_id, placement: { list_id: listId, position_key: key }, ackedAt: null });
+    this.movedBy_.delete(cardId);
+  }
+
+  /**
+   * What this client shows on the board (§1.1 presence): the open card, or null, and whether
+   * the user is active. Sent now and every 10s while connected; never stored (§5.2).
+   */
+  setPresence(cardId: string | null, state: "active" | "idle" = "active"): void {
+    const same = this.myPresence && this.myPresence.cardId === cardId && this.myPresence.state === state;
+    this.myPresence = { cardId, state };
+    if (!same) this.sendPresence();
   }
 
   moveList(listId: string, index: number): void {
@@ -235,6 +340,8 @@ export class SyncClient {
   close(): void {
     this.status_ = "closed";
     this.clearTimers();
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = null;
     const ws = this.ws;
     this.ws = null;
     ws?.close(1000, "client closed");
@@ -302,6 +409,9 @@ export class SyncClient {
     if (this.resendTimer) clearTimeout(this.resendTimer);
     this.resendTimer = null;
     this.deferred.clear(); // JOINED resends the whole queue in order
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = null;
+    this.presence_.clear(); // stale once we are gone; JOINED brings the current set
     if (this.status_ === "closed" || this.status_ === "unauthorized") return;
     this.status_ = "offline";
     this.urlIndex++;
@@ -327,6 +437,7 @@ export class SyncClient {
       case "JOINED": {
         this.offsetMs = (m.server_time_ms as number) - this.now();
         this.role = m.role as string;
+        if (m.members && typeof m.members === "object") this.members_ = new Map(Object.entries(m.members as Record<string, Member>));
         this.catchUp(m);
         this.status_ = "joined";
         this.attempt = 0;
@@ -334,6 +445,9 @@ export class SyncClient {
         this.joinTimer = null;
         this.log("joined", { version: this.version, pending: this.pending.length });
         for (const op of this.pending) this.send({ type: "OP", op }); // step 5: resend the queue
+        this.sendPresence();
+        if (this.presenceTimer) clearInterval(this.presenceTimer);
+        this.presenceTimer = setInterval(() => this.sendPresence(), PRESENCE_EVERY_MS);
         break;
       }
       case "SYNC":
@@ -342,8 +456,16 @@ export class SyncClient {
         this.catchUp(m);
         break;
       case "OP_BROADCAST":
+        this.learnUser(m.op as Op, m.user_id);
         this.confirmedOp(m.op as Op, m.version as number, true);
         break;
+      case "PRESENCE_UPDATE": {
+        // Several gateways may sweep the same board, so "left" can arrive more than once.
+        const user = m.user_id as string;
+        if (m.state === "left") this.presence_.delete(user);
+        else this.presence_.set(user, { cardId: (m.card_id as string | null) ?? null, state: m.state === "idle" ? "idle" : "active" });
+        break;
+      }
       case "OP_ACK":
         this.acked(m.op_id as string, m.version as number);
         break;
@@ -367,7 +489,8 @@ export class SyncClient {
     if (m.snapshot !== undefined) {
       this.confirmed = Board.decode(m.snapshot);
     } else {
-      for (const e of m.ops as { op: Op; version: number }[]) {
+      for (const e of m.ops as { op: Op; version: number; user_id?: string }[]) {
+        this.learnUser(e.op, e.user_id);
         if (this.version === null || e.version > this.version) {
           this.confirmed.apply(e.op);
           this.observe(e.op);
@@ -407,6 +530,7 @@ export class SyncClient {
     this.deferred.delete(opId);
     this.resendAttempt = 0;
     this.log("acked", { op_id: opId, version });
+    for (const mv of this.localMoves.values()) if (mv.op_id === opId) mv.ackedAt = this.now();
     this.confirmedOp(op!, version, false); // §7.3 step 6
     // Deferred ops now at the head have everything before them committed: judge them again.
     let k = 0;
@@ -535,8 +659,45 @@ export class SyncClient {
     return plan.key;
   }
 
+  /**
+   * §3.5: a move of ours lost to a concurrent move when the card now shows a placement other
+   * than the one we chose. Checked after every change, for our moves still pending or ACKed in
+   * the last 30s. The winner's user comes from the winning register's replica.
+   */
+  private checkMoves(): void {
+    if (this.localMoves.size === 0) return;
+    const now = this.now();
+    let state: ReturnType<Board["encode"]> | null = null;
+    for (const [card, mv] of this.localMoves) {
+      if (mv.ackedAt !== null && now - mv.ackedAt > MOVE_WATCH_MS) {
+        this.localMoves.delete(card);
+        continue;
+      }
+      state ??= this.viewBoard().encode();
+      const reg = (state.registers as Record<string, Record<string, { value: Placement; hlc: Hlc }>>)[card]?.placement;
+      if (!reg) continue;
+      const shown = reg.value as { list_id?: string; position_key: string };
+      const mine = mv.placement as { list_id?: string; position_key: string };
+      if (shown.list_id === mine.list_id && shown.position_key === mine.position_key) continue;
+      if (reg.hlc.replica_id === this.replicaId) continue; // a later move of our own
+      this.localMoves.delete(card);
+      this.movedBy_.set(card, { userId: this.replicaUser.get(reg.hlc.replica_id) ?? null, at: now });
+      this.log("move_lost", { card_id: card });
+    }
+  }
+
+  private learnUser(op: Op, userId: unknown): void {
+    if (typeof userId === "string") this.replicaUser.set(op.replica_id, userId);
+  }
+
+  private sendPresence(): void {
+    if (this.status_ !== "joined" || !this.myPresence) return;
+    this.send({ type: "PRESENCE", board_id: this.opts.boardId, card_id: this.myPresence.cardId, state: this.myPresence.state });
+  }
+
   private changed(): void {
     this.viewCache = null;
+    this.checkMoves();
     const state: Saved = {
       replicaId: this.replicaId,
       hlc: this.clock,

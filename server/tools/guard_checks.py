@@ -18,6 +18,8 @@ STORE = "session/src/main/java/dev/concord/session/Store.java"
 OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
 API = "gateway/src/main/java/dev/concord/gateway/Api.java"
 ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
+CLIENT = "../client-core/src/client.ts"
+IDB = "../client-core/src/idb.ts"
 
 # name: (what is removed, [(file, old, new)], test filter, must the test fail?)
 CHECKS = {
@@ -90,6 +92,11 @@ CHECKS = {
         "redacting ticket= and session values in log lines (only access_token= left)",
         [(ENCODER, "\"((?:ticket|access_token|concord_session)=|Bearer )", "\"((?:access_token)=)")],
         "dev.concord.gateway.GatewayLogTest.tokensNeverReachTheLogs", True),
+    # Phase 3, client: vitest (client-core) and Playwright (web) checks.
+    "equal-key-rekey": (
+        "re-keying equal upper neighbours before an insert (SPEC 3.7 rule B)",
+        [(CLIENT, "    for (const r of plan.rekeys) this.submit(rekey(entries[r.index]!.id, r.key));\n", "")],
+        "vitest:test/unit/features.test.ts", True),
     # Drill checks: the Session image is rebuilt with the guard removed and the drill run
     # against the compose stack (deploy/docker-compose.yml must be up), then restored.
     "fence-counter-rebuild": (
@@ -107,7 +114,22 @@ COMPOSE = ["docker", "compose", "-f", str(REPO / "deploy/docker-compose.yml")]
 
 
 def run_check(test):
-    return drill(test.split(":", 1)[1]) if test.startswith("drill:") else gradle(test)
+    kind, _, rest = test.partition(":")
+    if kind == "drill":
+        return drill(rest)
+    if kind == "vitest":
+        return node(REPO / "client-core", ["vitest", "run", rest])
+    if kind == "pw":
+        return node(REPO / "web", ["playwright", "test", rest])
+    return gradle(test)
+
+
+def node(cwd, args):
+    npx = shutil.which("npx") or "npx"
+    r = subprocess.run([npx, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = re.sub(r"\[[0-9;]*m", "", r.stdout + r.stderr)
+    why = next((l.strip() for l in out.splitlines() if "AssertionError" in l or "Error:" in l), "")
+    return r.returncode == 0, why[:200]
 
 
 def drill(name):
@@ -166,7 +188,7 @@ def main(names):
         expected = (not ok_removed) if must_fail else ok_removed
         if not expected or not ok_restored:
             surprises += 1
-        print(f"{name}: removed {what}\n  test {test.split('.')[-1]}: "
+        print(f"{name}: removed {what}\n  test {test if ':' in test else test.split('.')[-1]}: "
               f"{'PASSED' if ok_removed else 'FAILED'} without the guard"
               f"{' (' + why + ')' if why and not ok_removed else ''}; "
               f"{'PASSED' if ok_restored else 'FAILED'} with it restored"

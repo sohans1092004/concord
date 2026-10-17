@@ -49,3 +49,7 @@ log-redaction-ticket: removed redacting ticket= and session values in log lines 
 
 Binary file C:/Users/sohan/AppData/Local/Temp/claude/C--Users-sohan-OneDrive-Desktop-STUDY-Projects-Sde/2bf099c7-3cfb-497a-8251-a679e70c5b9f/tasks/bux23i6jm.output matches
 exit 0
+
+Command: cd server && python tools/guard_checks.py equal-key-rekey   (2026-10-17)
+equal-key-rekey: removed re-keying equal upper neighbours before an insert (SPEC 3.7 rule B)
+  test vitest:test/unit/features.test.ts: FAILED without the guard (AssertionError: expected [ 'ADD_CARD' ] to deeply equal [ 'SET_PLACEMENT', 'ADD_CARD' ]); PASSED with it restored

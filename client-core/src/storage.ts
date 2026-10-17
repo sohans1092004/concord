@@ -1,6 +1,6 @@
 // Where a client keeps what must survive a reload (SPEC §7.1): the confirmed replica and its
 // version, the pending queue, Unsent edits, the replica ID, the HLC and the clock offset.
-// Phase 3 adds an IndexedDB implementation behind this same interface.
+// IndexedDbStorage (idb.ts) is the browser implementation.
 
 import type { BoardJson, Hlc, Op } from "@concord/crdt";
 
@@ -23,6 +23,8 @@ export interface Saved {
 }
 
 export interface Storage {
+  /** The replica ID a fresh client should use (IndexedDbStorage: this tab's). Default: a new one. */
+  readonly replicaId?: string;
   load(): Promise<Saved | undefined>;
   save(state: Saved): Promise<void>;
 }
