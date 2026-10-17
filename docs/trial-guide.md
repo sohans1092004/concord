@@ -8,13 +8,15 @@ surprises you.
 
 ## Getting started
 
-1. Open the link you were sent. Choose **Create an account** and enter your email, the name
-   others should see, a password (8 characters or more) and the invite code, if you were
-   given one.
-2. **Create board**, or wait for someone to add you to theirs. Board owners add people under
+1. Open the address in the message that invited you (`https://concord-<name>.duckdns.org`)
+   in a current Chrome, Edge, Firefox or Safari.
+2. Choose **New here? Create an account**. Enter your email, the name others should see, a
+   password of 8 characters or more, and the **invite code** from the same message. Without the
+   code, sign-up is refused.
+3. **Create board**, or wait for someone to add you to theirs. Board owners add people under
    **Members**, using the email they signed up with, as *editor* (can change things) or
    *viewer* (can only look).
-3. Add lists with **+ Add a list**, and cards with **+ Add a card** under a list.
+4. Add lists with **+ Add a list**, and cards with **+ Add a card** under a list.
 
 ## Everyday use
 
@@ -59,6 +61,36 @@ Your password and sign-in are never included. Reports go straight to us; we read
 
 If the app does not open at all, email the person who invited you, with the time and what
 you saw.
+
+## Privacy
+
+**What Concord stores:**
+- your email, your name and a scrambled form of your password, never the password itself;
+- your boards and every change made to them, with who made it and when: that is what History shows;
+- who is a member of each board;
+- your sign-in sessions;
+- any bug report you send.
+
+Your browser also keeps a copy of the boards you open, so they work offline.
+
+**What a bug report includes:** the text you write, plus only what you leave ticked in the
+form. The form shows every item in full before you send:
+- the app version and your browser;
+- the connection status and how many edits are waiting;
+- any Unsent edits;
+- the app's last 200 internal events (connects, reconnects, saves; never your password or
+  sign-in token).
+
+**Who can see it:** only the person running the trial, on one private server. Backups are
+encrypted before they leave the server.
+
+**Deletion:**
+- At any time, ask the person who invited you to delete your data. They remove your account,
+  your bug reports, and every board where you are the only member.
+- On boards you share, the changes you made stay, so the board stays whole for the others, but
+  they are no longer linked to your name.
+- **Everything is deleted at the end of the trial**, including the backups within 14 days of
+  that.
 
 ## Known limits
 

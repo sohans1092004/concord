@@ -1,0 +1,59 @@
+# Phase 4a rehearsal results (this laptop; production stack via deploy/prod/rehearse.sh, public through a Cloudflare quick tunnel)
+
+## Backup to the bucket, then restore + verify (2026-10-17)
+command: deploy/prod/rehearse.sh exec -T backup /app/backup/backup.sh && deploy/prod/rehearse.sh ./restore.sh ~/.concord-rehearsal-age.key latest
+{"event":"backup_done","at":"2026-10-17T08:55:18Z","object":"concord-20261017T085516Z.tar.age","bytes":41160,"seconds":2,"kept":2,"summary":{"boards":3,"rows":{"board_members":6,"board_ops":153,"board_snapshots":3,"boards":3,"bug_reports":0,"sessions":6,"users":6,"ws_tickets":0}}}
+---
+restoring concord-20261017T085516Z.tar.age (the latest in the bucket)
+manifest: {"at":"2026-10-17T08:55:17.758454878Z","boards":{"0c443ffb-73bd-4ccc-a46d-82c75c384372":{"ops":51,"sha256":"d511c12c6d7e947c4a4691e74d1799f7ad96cba37e4f52a67e2577fd5d625d75","version":51},"71d9ee14-8943-4bd9-ac1c-cb994128c589":{"ops":51,"sha256":"c1f1528112d37bad6db89893e5a683ae1335e061fd747e2bbac73...
+pg_restore took 1s
+{"boards_checked":3,"problems":[],"rows":{"board_members":6,"board_ops":153,"board_snapshots":3,"boards":3,"bug_reports":0,"sessions":6,"users":6,"ws_tickets":0}}
+RESTORE VERIFIED: concord-20261017T085516Z.tar.age
+restore wall time: real	0m19.885s
+(first attempt, 08:44Z, failed: 'pg_restore: error: unsupported version (1.16) in file header' - the image had pg_dump 18; fixed by pinning noble + postgresql-client-16)
+
+## Deploy under live editing, run 1 (2026-10-17, 08:56:14-09:02:24Z)
+command: SMOKE_URL=<tunnel> SMOKE_INVITE=<code> SMOKE_LIVE_SECONDS=360 npx vitest run test/smoke -t 'loses nothing'  (client-core), with deploy/prod/rehearse.sh ./deploy.sh started 30s in, then rehearse.sh restart caddy
+== 08:56:44 deploy.sh
+== 08:56:45 build
+== 08:59:46 backup before deploying
+== 09:00:04 migrate (forward-only)
+== 09:00:08 replace session1
+== 09:00:26 replace session2
+== 09:00:45 replace gateway
+== 09:01:00 the rest (caddy, redis: only if their config changed)
+== 09:01:05 done
+== 09:01:06 restart caddy
+LIVE {"url":"https://promote-matters-laboratories-delaware.trycloudflare.com","seconds":360,"submitted":2796,"acked":2797,"board_version":2797,"history":2797,"acked_missing":0,"unsent":0,"unsent_detail":[],"connections_dropped":0,"converged":true}
+result: passed. connections_dropped counted the wrong event (a clean close does not log it), so reconnects were not measured in this run; see run 2.
+
+## Deploy under live editing, run 2 (2026-10-17, 09:03:27-09:08:40Z)
+command: as run 1 with SMOKE_LIVE_SECONDS=300; deploy.sh 30s in, then rehearse.sh restart caddy 20s after it
+== 09:03:57 deploy.sh
+== 09:03:57 build
+== 09:04:22 backup before deploying
+== 09:04:28 migrate (forward-only)
+== 09:04:32 replace session1
+== 09:04:50 replace session2
+== 09:05:09 replace gateway
+== 09:05:22 the rest (caddy, redis: only if their config changed)
+== 09:05:27 done
+== 09:05:49 restart caddy
+LIVE {"url":"https://promote-matters-laboratories-delaware.trycloudflare.com","seconds":300,"submitted":2333,"acked":2334,"board_version":2334,"history":2334,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":6,"converged":true}
+result: passed. rejoins 6 = 3 clients x 2 (gateway replaced with RECONNECT_ELSEWHERE, then Caddy restarted): 0 lost ops, 0 Unsent edits through both.
+
+## Memory of the production stack (2026-10-17 09:09Z, after the two deploy runs above)
+command: docker stats --no-stream (concord-rehearsal-*); limits from deploy/prod/compose.yaml
+gateway 205.9MiB / 512MiB
+session2 130.9MiB / 640MiB
+session1 169.2MiB / 640MiB
+backup 12.57MiB / 384MiB
+caddy 11.91MiB / 96MiB
+postgres 46.32MiB / 384MiB
+minio 22.48MiB / 7.569GiB
+redis 6.875MiB / 96MiB
+tunnel 25.87MiB / 7.569GiB
+total of the production services (without the rehearsal-only minio and tunnel): 584 MiB
+sum of the limits (worst case): 512+640+640+384+384+96+96 = 2752 MiB (+256 MiB for migrate while it runs)
+headroom: measured, on this laptop's 7.57 GiB Docker VM: about 92% free for these; worst case on the planned 12 GB Oracle VM: 2.75 GB used, 77% free (the 25% criterion holds even at every limit); on a 6 GB VM: 54% free
+JVMs use the Serial collector (the JVM's choice for containers under 1792 MB); heaps capped at 256m (gateway) and 384m (sessions)

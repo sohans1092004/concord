@@ -15,11 +15,13 @@ conformance/runner/   differential fuzz: TypeScript generates, Java answers, any
 server/               Phase 2, Java: common, session (board actors), gateway, devtools (dev only)
 client-core/          Phase 2–3, TypeScript: the headless sync client (and IndexedDB storage), e2e tests and drills
 web/                  Phase 3, React + Vite: the board UI over client-core; Playwright tests in web/e2e
-deploy/               docker-compose.yml (2 gateways, 3 Session instances, Postgres, Redis), drills
+deploy/               docker-compose.yml (2 gateways, 3 Session instances, Postgres, Redis), drills, soak/
+deploy/prod/          Phase 4a: the trial deployment (Caddy, 1 gateway, 2 Session instances, backups), scripts
 docs/adr/             ADR-000, 000b, 001–004, 006, 007
 docs/walkthrough-phase2.md   one op from a client's send to every other client's view
 docs/walkthrough-phase3.md   one click, from the screen to IndexedDB to the wire to another browser
 docs/trial-guide.md          one page for the people trying it; docs/manual-offline-run.md, the by-hand hour
+docs/runbook.md              Phase 4a: from a fresh VM to the trial, backups, restores, deploys, what to do when it dies
 ```
 
 ## What it guarantees
