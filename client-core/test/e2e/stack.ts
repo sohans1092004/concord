@@ -10,7 +10,7 @@ export const GATEWAYS = ["ws://localhost:8081/ws", "ws://localhost:8082/ws"];
 
 export interface Seeded {
   board: string;
-  users: { id: string; role: string; token: string }[];
+  users: { id: string; role: string; name: string; session: string }[];
 }
 
 /** One board with an owner, `editors` editors and `viewers` viewers (devtools, dev only). */
@@ -53,8 +53,16 @@ export function storedOpIds(board: string): Set<string> {
   return new Set(psql(`SELECT op_id FROM board_ops WHERE board_id = '${board}'`));
 }
 
-/** A client of `board` as `token`, pinned to one gateway first; records every ACK. */
-export async function client(board: string, token: string, gateway: number, extra: Partial<ClientOptions> = {}) {
+/** A single-use WebSocket ticket from the REST API of the gateway behind `wsUrl` (SPEC §9.4). */
+export async function ticket(session: string, wsUrl: string = GATEWAYS[0]!): Promise<string> {
+  const rest = wsUrl.replace(/^ws/, "http").replace(/\/ws$/, "/api/ws-ticket");
+  const r = await fetch(rest, { method: "POST", headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" }, body: "{}" });
+  if (!r.ok) throw new Error(`ticket: ${r.status}`);
+  return ((await r.json()) as { ticket: string }).ticket;
+}
+
+/** A client of `board` signed in as `session`, pinned to one gateway first; records every ACK. */
+export async function client(board: string, session: string, gateway: number, extra: Partial<ClientOptions> = {}) {
   const acked = new Map<string, number>();
   const events: { event: string; data: Record<string, unknown>; at: number }[] = [];
   const urls = [...GATEWAYS.slice(gateway), ...GATEWAYS.slice(0, gateway)];
@@ -62,7 +70,7 @@ export async function client(board: string, token: string, gateway: number, extr
   const c = await SyncClient.open({
     urls,
     boardId: board,
-    token: () => token,
+    ticket: (url) => ticket(session, url),
     storage: new MemoryStorage(),
     // The first connection goes to the chosen gateway; later ones rotate through the list.
     random: () => (first ? ((first = false), 0) : Math.random()),

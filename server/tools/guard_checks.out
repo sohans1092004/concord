@@ -27,3 +27,25 @@ exit 0
 retake-fence-check: removed the boards.fence check before re-taking a missing lease (amendment 13)
   test staleOwnerDoesNotRetakeAWipedLease: FAILED without the guard (org.opentest4j.AssertionFailedError: a stale owner must not re-take the lease ==> expected: <0> but was: <2>); PASSED with it restored
 
+
+Command: cd server && python tools/guard_checks.py ticket-single-use ticket-expiry rest-origin password-revokes-sessions members-owner-only last-owner history-members-only bug-report-redaction log-redaction-ticket   (2026-10-17, Phase 3 REST)
+  test aTicketWorksOnceAndOnlyWithin30Seconds: FAILED without the guard (org.opentest4j.AssertionFailedError: a used ticket is refused ==> Expected java.lang.Exception to be thrown, but nothing was thrown.); PASSED with it restored
+ticket-expiry: removed the 30s expiry check when a ticket is used
+  test aTicketWorksOnceAndOnlyWithin30Seconds: FAILED without the guard (org.opentest4j.AssertionFailedError: a ticket older than 30s is refused ==> Expected java.lang.Exception to be thrown, but nothing was thrown.); PASSED with it restored
+rest-origin: removed the Origin checks on state-changing REST calls
+  test stateChangingCallsRequireAnAllowedOrigin: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <403> but was: <201>); PASSED with it restored
+password-revokes-sessions: removed deleting the user's other sessions when the password changes
+  test changingThePasswordEndsTheUsersOtherSessions: FAILED without the guard (org.opentest4j.AssertionFailedError: the other session is revoked ==> expected: <401> but was: <200>); PASSED with it restored
+members-owner-only: removed the owner check on adding a member
+  test boardsMembersAndRoles: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <403> but was: <404>); PASSED with it restored
+last-owner: removed the rule that a board keeps at least one owner
+  test boardsMembersAndRoles: FAILED without the guard (org.opentest4j.AssertionFailedError: the last owner stays ==> expected: <409> but was: <200>); PASSED with it restored
+history-members-only: removed the membership check on the history endpoint
+  test boardsMembersAndRoles: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <404> but was: <200>); PASSED with it restored
+bug-report-redaction: removed redacting secrets from bug-report diagnostics and description
+  test bugReportsAreStoredWithSecretsRedacted: FAILED without the guard (org.opentest4j.AssertionFailedError: cards jumped; my session concord_session=UIC0C7q8fV5CekBTj4EVcQAirZMYy_AtmeLCmLUkHu0 {"log": ["connect ws://x/ws?ticket=4O9sIaDKRJnUeGFHOJ2yAmHrDPwG7Q7Vl64i3ancClY); PASSED with it restored
+log-redaction-ticket: removed redacting ticket= and session values in log lines (only access_token= left)
+  test tokensNeverReachTheLogs: FAILED without the guard (org.opentest4j.AssertionFailedError: secret in encoded output: {"sequenceNumber":0,"timestamp":1792201391339,"nanoseconds":339586600,"level":"DEBUG","threadName":"JettyServerThreadPool-Virtual-13","lo); PASSED with it restored
+
+Binary file C:/Users/sohan/AppData/Local/Temp/claude/C--Users-sohan-OneDrive-Desktop-STUDY-Projects-Sde/2bf099c7-3cfb-497a-8251-a679e70c5b9f/tasks/bux23i6jm.output matches
+exit 0

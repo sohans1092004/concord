@@ -72,7 +72,7 @@ export async function drill(
   const result: Record<string, unknown> = { drill: name, board: seeded.board, clients: n };
   const log = (k: string, v: unknown) => (result[k] = v);
   const clients: Awaited<ReturnType<typeof client>>[] = [];
-  for (let i = 0; i < n; i++) clients.push(await client(seeded.board, seeded.users[i]!.token, i % 2));
+  for (let i = 0; i < n; i++) clients.push(await client(seeded.board, seeded.users[i]!.session, i % 2));
   for (const x of clients) await x.c.until(() => x.c.status === "joined", 30_000);
   // Every client works from the same first list so they collide constantly.
   clients[0]!.c.addList("drill");
@@ -107,7 +107,7 @@ export async function drill(
   const version = boardVersion(seeded.board);
   for (const x of clients) await x.c.until(() => x.c.confirmedVersion === version, 60_000);
   const hashes = await Promise.all(clients.map((x) => x.c.confirmedHash()));
-  const fresh = await client(seeded.board, seeded.users[0]!.token, 0);
+  const fresh = await client(seeded.board, seeded.users[0]!.session, 0);
   await fresh.c.until(() => fresh.c.status === "joined" && fresh.c.confirmedVersion === version, 60_000);
   hashes.push(await fresh.c.confirmedHash());
 

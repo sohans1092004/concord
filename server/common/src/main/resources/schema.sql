@@ -3,9 +3,27 @@
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,         -- scrypt or argon2id
+    email TEXT UNIQUE NOT NULL,          -- stored lowercased
+    name TEXT NOT NULL,                  -- 1-80 code points, shown to other members
+    password_hash TEXT NOT NULL,         -- argon2id, PHC string format
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Sign-in sessions (SPEC §9.4): only the SHA-256 of the cookie's token is stored, so a leaked
+-- copy of this table cannot be replayed as a sign-in.
+CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX sessions_user ON sessions (user_id);
+
+-- Single-use WebSocket tickets, valid 30s (SPEC §9.4). Using one deletes it.
+CREATE TABLE ws_tickets (
+    token_hash TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE boards (
@@ -42,6 +60,17 @@ CREATE TABLE board_ops (
     UNIQUE (board_id, version)
 );
 CREATE INDEX board_ops_history ON board_ops (board_id, committed_at DESC);
+
+-- Bug reports from the in-app form (Phase 3 trial). Diagnostics are what the tester chose to
+-- attach, already passed through the token redactor.
+CREATE TABLE bug_reports (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    board_id UUID REFERENCES boards(id),
+    description TEXT NOT NULL,
+    diagnostics JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE board_snapshots (
     board_id UUID NOT NULL REFERENCES boards(id),

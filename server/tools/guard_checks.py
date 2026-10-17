@@ -16,6 +16,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ACTOR = "session/src/main/java/dev/concord/session/BoardActor.java"
 STORE = "session/src/main/java/dev/concord/session/Store.java"
 OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
+API = "gateway/src/main/java/dev/concord/gateway/Api.java"
+ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
 
 # name: (what is removed, [(file, old, new)], test filter, must the test fail?)
 CHECKS = {
@@ -47,6 +49,47 @@ CHECKS = {
         "the boards.fence check before re-taking a missing lease (amendment 13)",
         [(OWNERSHIP, "if (current == null || current != fence) return 0;", "if (current == null) return 0;")],
         "dev.concord.session.FencingTest.staleOwnerDoesNotRetakeAWipedLease", True),
+    # Phase 3: sign-in, tickets and the REST API (gateway).
+    "ticket-single-use": (
+        "deleting the ticket as it is read (a plain SELECT instead), SPEC §9.4",
+        [(API, "\"DELETE FROM ws_tickets WHERE token_hash = ? AND expires_at > now() RETURNING user_id\"",
+          "\"SELECT user_id FROM ws_tickets WHERE token_hash = ? AND expires_at > now()\"")],
+        "dev.concord.gateway.ApiTest.aTicketWorksOnceAndOnlyWithin30Seconds", True),
+    "ticket-expiry": (
+        "the 30s expiry check when a ticket is used",
+        [(API, "WHERE token_hash = ? AND expires_at > now() RETURNING user_id", "WHERE token_hash = ? RETURNING user_id")],
+        "dev.concord.gateway.ApiTest.aTicketWorksOnceAndOnlyWithin30Seconds", True),
+    "rest-origin": (
+        "the Origin checks on state-changing REST calls",
+        [(API, "if (origin != null && !config.allowedOrigins().contains(origin)) throw new HttpResponseException(403, \"origin not allowed\");", ""),
+         (API, "if (origin == null && ctx.cookie(COOKIE) != null) throw new HttpResponseException(403, \"origin required\");", "")],
+        "dev.concord.gateway.ApiTest.stateChangingCallsRequireAnAllowedOrigin", True),
+    "password-revokes-sessions": (
+        "deleting the user's other sessions when the password changes",
+        [(API, "\"DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?\"", "\"DELETE FROM sessions WHERE user_id = ? AND token_hash <> ? AND false\"")],
+        "dev.concord.gateway.ApiTest.changingThePasswordEndsTheUsersOtherSessions", True),
+    "members-owner-only": (
+        "the owner check on adding a member",
+        [(API, "if (!role(board, u).equals(\"owner\")) throw new HttpResponseException(403, \"only owners manage members\");\n        Map<?, ?> b = body(ctx);",
+          "role(board, u);\n        Map<?, ?> b = body(ctx);")],
+        "dev.concord.gateway.ApiTest.boardsMembersAndRoles", True),
+    "last-owner": (
+        "the rule that a board keeps at least one owner",
+        [(API, "if (owners.equals(List.of(target)) && !\"owner\".equals(role))", "if (false)")],
+        "dev.concord.gateway.ApiTest.boardsMembersAndRoles", True),
+    "history-members-only": (
+        "the membership check on the history endpoint",
+        [(API, "        role(board, u);\n        long before", "        long before")],
+        "dev.concord.gateway.ApiTest.boardsMembersAndRoles", True),
+    "bug-report-redaction": (
+        "redacting secrets from bug-report diagnostics and description",
+        [(API, "redacted = RedactingJsonEncoder.redact(dev.concord.crdt.Canonical.encode(diag));", "redacted = dev.concord.crdt.Canonical.encode(diag);"),
+         (API, "String description = RedactingJsonEncoder.redact(str(b, \"description\", 1, 10_000));", "String description = str(b, \"description\", 1, 10_000);")],
+        "dev.concord.gateway.ApiTest.bugReportsAreStoredWithSecretsRedacted", True),
+    "log-redaction-ticket": (
+        "redacting ticket= and session values in log lines (only access_token= left)",
+        [(ENCODER, "\"((?:ticket|access_token|concord_session)=|Bearer )", "\"((?:access_token)=)")],
+        "dev.concord.gateway.GatewayLogTest.tokensNeverReachTheLogs", True),
     # Drill checks: the Session image is rebuilt with the guard removed and the drill run
     # against the compose stack (deploy/docker-compose.yml must be up), then restored.
     "fence-counter-rebuild": (
@@ -83,8 +126,12 @@ def drill(name):
     return r.returncode == 0, why[:200]
 
 
+def module(test):
+    return test.split(".")[2]  # dev.concord.<module>.Class.method
+
+
 def gradle(test):
-    cmd = [str(ROOT / ("gradlew.bat" if sys.platform == "win32" else "gradlew")), ":session:test", "--tests", test, "-q"]
+    cmd = [str(ROOT / ("gradlew.bat" if sys.platform == "win32" else "gradlew")), f":{module(test)}:test", "--tests", test, "-q"]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0, failure_message(test)
 
@@ -92,7 +139,7 @@ def gradle(test):
 def failure_message(test):
     """The first failure message JUnit recorded for the test class, shortened."""
     cls = test.rsplit(".", 1)[0]
-    xml = ROOT / "session/build/test-results/test" / f"TEST-{cls}.xml"
+    xml = ROOT / module(test) / "build/test-results/test" / f"TEST-{cls}.xml"
     if not xml.exists():
         return ""
     m = re.search(r'<failure message="([^"]*)"', xml.read_text(encoding="utf-8"))

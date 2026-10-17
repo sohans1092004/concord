@@ -35,14 +35,11 @@ class SlowConsumerTest {
     @SuppressWarnings("unchecked")
     void aStalledClientIsDisconnectedAndItsBacklogStaysUnderTheLimit() throws Exception {
         GatewayTest.Board b = GatewayTest.seed(1, 0);
-        Map<String, String> env = new java.util.HashMap<>();
-        env.put("CONCORD_ENV", "dev");
-        env.put("CONCORD_REDIS_URL", Infra.redisUrl());
-        env.put("CONCORD_PORT", Integer.toString(Infra.freePort()));
+        Map<String, String> env = Infra.gatewayEnv();
         env.put("CONCORD_CLIENT_OUTBOX_BYTES", Long.toString(LIMIT));
         try (var session = dev.concord.session.Harness.start("slow-s-" + Ops.uuid(), dev.concord.session.Store::new, false);
                 GatewayMain g = new GatewayMain(dev.concord.common.Config.from(env));
-                WsClient writer = new WsClient(g.port(), b.token(0), null)) {
+                WsClient writer = new WsClient(g.port(), b.token(g.port(), 0), null)) {
             assertTrue(session.port() > 0); // the board's owner, in process
             // A board whose full catch-up is a few hundred KB: 40 cards with 9,000-character descriptions.
             writer.join(b.id(), null);
@@ -59,7 +56,7 @@ class SlowConsumerTest {
             try (Socket stalled = new Socket()) {
                 stalled.setReceiveBufferSize(4_096);
                 stalled.connect(new java.net.InetSocketAddress("localhost", g.port()));
-                handshake(stalled, g.port(), b.token(1));
+                handshake(stalled, g.port(), b.token(g.port(), 1));
                 OutputStream out = stalled.getOutputStream();
                 frame(out, Msg.encode(Msg.obj("type", "JOIN", "board_id", b.id(), "since_version", 0L)));
                 long start = System.currentTimeMillis();
@@ -109,7 +106,7 @@ class SlowConsumerTest {
     }
 
     static void handshake(Socket s, int port, String token) throws Exception {
-        String req = "GET /ws?access_token=" + token + " HTTP/1.1\r\nHost: localhost:" + port + "\r\nUpgrade: websocket\r\n"
+        String req = "GET /ws?ticket=" + token + " HTTP/1.1\r\nHost: localhost:" + port + "\r\nUpgrade: websocket\r\n"
                 + "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
         s.getOutputStream().write(req.getBytes(StandardCharsets.US_ASCII));
         InputStream in = s.getInputStream();

@@ -403,9 +403,27 @@ Redis is wiped, everything except presence is rebuilt from Postgres.
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,         -- scrypt or argon2id
+    email TEXT UNIQUE NOT NULL,          -- stored lowercased
+    name TEXT NOT NULL,                  -- 1-80 code points, shown to other members
+    password_hash TEXT NOT NULL,         -- argon2id, PHC string format
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Sign-in sessions (SPEC §9.4): only the SHA-256 of the cookie's token is stored, so a leaked
+-- copy of this table cannot be replayed as a sign-in.
+CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX sessions_user ON sessions (user_id);
+
+-- Single-use WebSocket tickets, valid 30s (SPEC §9.4). Using one deletes it.
+CREATE TABLE ws_tickets (
+    token_hash TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE boards (
@@ -442,6 +460,17 @@ CREATE TABLE board_ops (
     UNIQUE (board_id, version)
 );
 CREATE INDEX board_ops_history ON board_ops (board_id, committed_at DESC);
+
+-- Bug reports from the in-app form (Phase 3 trial). Diagnostics are what the tester chose to
+-- attach, already passed through the token redactor.
+CREATE TABLE bug_reports (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    board_id UUID REFERENCES boards(id),
+    description TEXT NOT NULL,
+    diagnostics JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE board_snapshots (
     board_id UUID NOT NULL REFERENCES boards(id),
@@ -821,16 +850,30 @@ independent of both cores.
 
 ### 9.4 Security
 
-- JWTs live 15 minutes and are scoped to the user; board role is checked per op (§4.2), so
-  removal takes effect on the next op, not the next connect.
-- In Phase 2 the client passes its JWT in the WebSocket URL, `?access_token=…` (browsers
-  cannot set headers on a WebSocket). A token must never appear in any log: Concord's code
-  logs `user_id`, never the token, and every log line is written by an encoder that redacts
-  `access_token=` values and anything shaped like a JWT, which catches libraries that log
-  request lines at DEBUG (`GatewayLogTest`; client-core's log events are tested the same
-  way). Phase 3 replaces the URL token with a single-use ticket valid for 30s, issued by
-  the REST API to a signed-in session, so a URL that leaks is worthless by the time anyone
-  reads it.
+- Sign-in, as in Reliant: no JWTs. Signing in or up creates a session: 32 random bytes sent
+  as the `concord_session` cookie (`HttpOnly; SameSite=Strict; Secure; Path=/`, 30 days),
+  of which `sessions` stores only the SHA-256. Scripts (tests, drills) send the same token as
+  `Authorization: Bearer`. Changing the password deletes every other session of that user.
+  Sign-in is limited per email (5 attempts, then 1 a minute) and per IP (30, then 1 every
+  10s) in each gateway's memory, and an unknown email is checked against a dummy hash so
+  timing does not reveal it. Sign-up can require an invite code (`CONCORD_INVITE_CODE`; off
+  when empty).
+- Every state-changing REST call must be JSON and its `Origin`, when present, must be on the
+  allowlist; a request carrying the session cookie with no `Origin` is refused. Board role
+  is checked per op (§4.2), so removal takes effect on the next op, not the next connect.
+- The WebSocket URL carries a single-use ticket, `?ticket=…` (browsers cannot set headers on
+  a WebSocket): `POST /api/ws-ticket` returns 32 random bytes, `ws_tickets` stores their
+  SHA-256 with a 30s expiry, and the gateway uses it with
+  `DELETE … WHERE token_hash = ? AND expires_at > now() RETURNING user_id`, so it opens one
+  connection, once, on any gateway, and a leaked URL is worthless. Tickets live in Postgres,
+  not Redis, so connecting keeps working while Redis is down or after a wipe (§5). Each
+  gateway deletes expired tickets and sessions every minute.
+- No session token or ticket may appear in any log: Concord's code logs `user_id`, never a
+  secret, and every log line is written by an encoder that redacts `ticket=`,
+  `access_token=` and `concord_session=` values and `Bearer` credentials, which catches
+  libraries that log request lines or headers at DEBUG (`GatewayLogTest`; client-core's log
+  events are tested the same way). Bug-report text and diagnostics pass through the same
+  redactor before they are stored.
 - The WebSocket upgrade checks `Origin` against an allowlist, preventing cross-site
   WebSocket hijacking.
 - The internal gateway ↔ owner WebSocket (§2.3 step 4) requires a shared secret, sent by the
@@ -839,7 +882,7 @@ independent of both cores.
 - Rate limit per connection: 20 ops/s, burst 50, as a token bucket in the gateway's memory
   (a connection lives on one gateway, and limiting must keep working while Redis is down).
   Frames over 64 KB are rejected.
-- Passwords hashed with argon2id. Sessions stored hashed, as in Reliant.
+- Passwords hashed with argon2id (19 MiB, 2 passes, 1 lane; PHC string format).
 
 ### 9.5 Observability
 
@@ -947,3 +990,4 @@ section text itself is updated in the same commit.
 | 11 | 2026-10-17 | §6.2, §8 | Drill for row 3 with the stale owner cut off from Redis, so its lease renewal cannot save it and the Postgres fence must reject its commit (it must log the rejection and commit nothing). A claim whose drawn fence is not above `boards.fence` is counted (`claim_fence_retries`); the wipe-redis drill requires the rebuilt counter to give `boards.fence + 1` with no retry. |
 | 12 | 2026-10-17 | §6.3 | A stale owner that never writes is never fenced and may answer `JOIN`/`SYNC_REQUEST` from stale memory (a prefix of the committed history); the window is bounded by the gateway's 5s owner cache, and by the stale owner's next renewal when it can reach Redis. |
 | 13 | 2026-10-17 | §6.2 | A renewal that finds the lease gone re-takes it only if `boards.fence` still equals its fence; otherwise it drops the board (`FencingTest.staleOwnerDoesNotRetakeAWipedLease`, guard check `retake-fence-check`). |
+| 14 | 2026-10-17 | §5.1, §9.4 | Sign-in as in Reliant, no JWTs: hashed 30-day session cookie (or Bearer for scripts), argon2id, per-email and per-IP sign-in limits, optional invite code; changing the password revokes other sessions; Origin checked on every state-changing REST call. The WebSocket URL carries a single-use 30s ticket stored hashed in Postgres; expired tickets and sessions are deleted every minute. `users.name`, `sessions`, `ws_tickets` and `bug_reports` added to §5.1. The JWT code, config and secret are deleted. |

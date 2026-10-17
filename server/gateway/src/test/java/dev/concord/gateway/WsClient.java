@@ -20,10 +20,19 @@ final class WsClient implements WebSocket.Listener, AutoCloseable {
     private final StringBuilder partial = new StringBuilder();
     private final WebSocket ws;
 
-    WsClient(int port, String token, String origin) throws Exception {
+    /** A fresh single-use ticket (SPEC §9.4) from the gateway on {@code port}, for {@code session}. */
+    static String ticket(int port, String session) throws Exception {
+        var r = HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/ws-ticket"))
+                .header("Authorization", "Bearer " + session).header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{}")).build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (r.statusCode() != 200) throw new IllegalStateException("ticket: " + r.statusCode() + " " + r.body());
+        return (String) ((Map<?, ?>) Json.parse(r.body())).get("ticket");
+    }
+
+    WsClient(int port, String ticket, String origin) throws Exception {
         WebSocket.Builder b = HttpClient.newHttpClient().newWebSocketBuilder();
         if (origin != null) b.header("Origin", origin);
-        ws = b.buildAsync(URI.create("ws://localhost:" + port + "/ws?access_token=" + token), this).get(10, TimeUnit.SECONDS);
+        ws = b.buildAsync(URI.create("ws://localhost:" + port + "/ws?ticket=" + ticket), this).get(10, TimeUnit.SECONDS);
     }
 
     void send(Map<String, Object> frame) {

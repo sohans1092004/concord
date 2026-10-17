@@ -44,8 +44,11 @@ export interface ClientOptions {
   /** Gateway WebSocket URLs (ws://host:port/ws). A failed connection moves to the next. */
   readonly urls: readonly string[];
   readonly boardId: string;
-  /** A fresh JWT for each connection attempt (they live 15 minutes, SPEC §9.4). */
-  readonly token: () => string | Promise<string>;
+  /**
+   * A fresh single-use WebSocket ticket for each connection attempt (SPEC §9.4: valid 30s,
+   * fetched from the REST API with the signed-in session). Given the gateway URL about to be used.
+   */
+  readonly ticket: (url: string) => string | Promise<string>;
   readonly storage?: Storage;
   readonly connect?: (url: string) => Socket;
   readonly now?: () => number;
@@ -245,18 +248,18 @@ export class SyncClient {
     if (this.status_ === "closed" || this.status_ === "unauthorized") return;
     this.status_ = "connecting";
     const url = this.opts.urls[this.urlIndex % this.opts.urls.length]!;
-    let token: string;
+    let ticket: string;
     try {
-      token = await this.opts.token();
+      ticket = await this.opts.ticket(url);
     } catch (e) {
-      this.log("token_failed", { error: String(e) });
+      this.log("ticket_failed", { error: String(e) });
       this.disconnected();
       return;
     }
     if (this.status_ !== "connecting") return;
     let ws: Socket;
     try {
-      ws = this.connectFn(`${url}${url.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`);
+      ws = this.connectFn(`${url}${url.includes("?") ? "&" : "?"}ticket=${encodeURIComponent(ticket)}`);
     } catch (e) {
       this.log("connect_failed", { url, error: String(e) });
       this.disconnected();

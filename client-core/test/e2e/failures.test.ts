@@ -2,7 +2,7 @@
 // drills in test/drills; 13, a corrupt snapshot, is SnapshotTest in server/session.)
 import { describe, expect, it } from "vitest";
 import type { Socket } from "../../src/index.js";
-import { client, compose, GATEWAYS, psql, seed, sleep, storedOpIds } from "./stack.js";
+import { client, compose, GATEWAYS, psql, seed, sleep, storedOpIds, ticket } from "./stack.js";
 import { prng, randomEdit } from "./workload.js";
 
 async function settleBoth(board: string, ...xs: Awaited<ReturnType<typeof client>>[]) {
@@ -13,8 +13,8 @@ async function settleBoth(board: string, ...xs: Awaited<ReturnType<typeof client
 }
 
 /** A raw socket for sending frames no well-behaved client would send. */
-async function raw(token: string, gateway = 0): Promise<{ ws: WebSocket; inbox: Record<string, unknown>[] }> {
-  const ws = new WebSocket(`${GATEWAYS[gateway]}?access_token=${token}`);
+async function raw(session: string, gateway = 0): Promise<{ ws: WebSocket; inbox: Record<string, unknown>[] }> {
+  const ws = new WebSocket(`${GATEWAYS[gateway]}?ticket=${await ticket(session, GATEWAYS[gateway])}`);
   const inbox: Record<string, unknown>[] = [];
   ws.onmessage = (e) => inbox.push(JSON.parse(String(e.data)));
   await new Promise<void>((resolve, reject) => {
@@ -37,8 +37,8 @@ describe("§8 failure scenarios", () => {
   /** Row 1: a gateway crashes; its clients reconnect to another and resend their queues. */
   it("1: gateway crash", async () => {
     const s = seed(1);
-    const a = await client(s.board, s.users[0]!.token, 0); // on gateway1, which dies
-    const b = await client(s.board, s.users[1]!.token, 1);
+    const a = await client(s.board, s.users[0]!.session, 0); // on gateway1, which dies
+    const b = await client(s.board, s.users[1]!.session, 1);
     await a.c.until(() => a.c.status === "joined");
     await b.c.until(() => b.c.status === "joined");
     const ra = prng(1), rb = prng(2), da = new Set<string>(), db = new Set<string>();
@@ -98,8 +98,8 @@ describe("§8 failure scenarios", () => {
       };
       return wrapper;
     };
-    const writer = await client(s.board, s.users[0]!.token, 0);
-    const reader = await client(s.board, s.users[1]!.token, 1, { connect: lossy });
+    const writer = await client(s.board, s.users[0]!.session, 0);
+    const reader = await client(s.board, s.users[1]!.session, 1, { connect: lossy });
     await writer.c.until(() => writer.c.status === "joined");
     await reader.c.until(() => reader.c.status === "joined");
     const list = writer.c.addList("L");
@@ -120,9 +120,9 @@ describe("§8 failure scenarios", () => {
   /** Row 9: the same op sent many times; original ACK, stored once, broadcast once. */
   it("9: same op many times", async () => {
     const s = seed(1);
-    const watcher = await client(s.board, s.users[1]!.token, 1);
+    const watcher = await client(s.board, s.users[1]!.session, 1);
     await watcher.c.until(() => watcher.c.status === "joined");
-    const { ws, inbox } = await raw(s.users[0]!.token);
+    const { ws, inbox } = await raw(s.users[0]!.session);
     ws.send(JSON.stringify({ type: "JOIN", board_id: s.board, since_version: null }));
     await reply(inbox, (m) => m.type === "JOINED");
     const op = {
@@ -146,7 +146,7 @@ describe("§8 failure scenarios", () => {
   it("10: client clock two minutes fast", async () => {
     const s = seed(0);
     let jump = 0;
-    const fast = await client(s.board, s.users[0]!.token, 0, { now: () => Date.now() + jump });
+    const fast = await client(s.board, s.users[0]!.session, 0, { now: () => Date.now() + jump });
     // JOINED sets the offset from server time, so the skew must appear after joining: the
     // device clock jumps two minutes forward (a bad NTP step, a manual change).
     await fast.c.until(() => fast.c.status === "joined");
@@ -165,7 +165,7 @@ describe("§8 failure scenarios", () => {
   /** Row 12: malformed or malicious ops are rejected before persist and nothing is stored. */
   it("12: malformed and malicious frames", async () => {
     const s = seed(0, 1);
-    const { ws, inbox } = await raw(s.users[0]!.token);
+    const { ws, inbox } = await raw(s.users[0]!.session);
     ws.send(JSON.stringify({ type: "JOIN", board_id: s.board, since_version: null }));
     await reply(inbox, (m) => m.type === "JOINED");
     const good = (extra: Record<string, unknown>) => {
@@ -192,7 +192,7 @@ describe("§8 failure scenarios", () => {
     expect(errors.filter((e) => e.code === "INVALID_OP").length).toBe(bad.length + 2);
     expect(psql(`SELECT count(*) FROM board_ops WHERE board_id = '${s.board}'`)[0]).toBe("0");
     // A viewer's op is refused as UNAUTHORIZED.
-    const viewer = await raw(s.users[1]!.token, 1);
+    const viewer = await raw(s.users[1]!.session, 1);
     viewer.ws.send(JSON.stringify({ type: "JOIN", board_id: s.board, since_version: null }));
     await reply(viewer.inbox, (m) => m.type === "JOINED");
     const vop = good({});

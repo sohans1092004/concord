@@ -31,14 +31,31 @@ class SchemaTest {
     @Test
     void devSecretAndShortSecretsAreRefusedOutsideDev() {
         assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod")).check());
-        assertThrows(IllegalStateException.class,
-                () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", Config.DEV_JWT_SECRET)).check());
         assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "staging")).check());
-        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32))).check());
-        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32),
-                "CONCORD_INTERNAL_SECRET", Config.DEV_INTERNAL_SECRET)).check());
-        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_JWT_SECRET", "x".repeat(32), "CONCORD_INTERNAL_SECRET", "y".repeat(32))).check();
-        assertEquals(Config.DEV_JWT_SECRET, Config.from(Map.of("CONCORD_ENV", "dev")).check().jwtSecret());
+        assertThrows(IllegalStateException.class, () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(31))).check());
+        assertThrows(IllegalStateException.class,
+                () -> Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", Config.DEV_INTERNAL_SECRET)).check());
+        Config.from(Map.of("CONCORD_ENV", "prod", "CONCORD_INTERNAL_SECRET", "y".repeat(32))).check();
+        assertEquals(Config.DEV_INTERNAL_SECRET, Config.from(Map.of("CONCORD_ENV", "dev")).check().internalSecret());
+        assertEquals("", Config.from(Map.of("CONCORD_ENV", "dev")).inviteCode(), "sign-up is open unless a code is set");
+    }
+
+    @Test
+    void passwordsAreArgon2idAndVerify() {
+        String h = Passwords.hash("correct horse");
+        assertTrue(h.startsWith("$argon2id$v=19$m=19456,t=2,p=1$"), h);
+        assertTrue(Passwords.verify("correct horse", h));
+        assertTrue(!Passwords.verify("correct horsf", h));
+        assertTrue(!Passwords.hash("correct horse").equals(h), "salted");
+        assertTrue(!Passwords.verify("x", "dev-no-login"), "a non-PHC hash never verifies");
+    }
+
+    @Test
+    void redactorRemovesEverySecretShape() {
+        String line = "GET /ws?ticket=abc_DEF-123&x=1 Cookie: concord_session=s3cr3t; Authorization: Bearer tok-en \"access_token=zzz\"";
+        String r = RedactingJsonEncoder.redact(line);
+        for (String secret : new String[] {"abc_DEF-123", "s3cr3t", "tok-en", "zzz"}) assertTrue(!r.contains(secret), r);
+        assertTrue(r.contains("ticket=REDACTED&x=1"), r);
     }
 
     @Test

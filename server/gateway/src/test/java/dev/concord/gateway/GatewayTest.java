@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.concord.common.Config;
 import dev.concord.common.Msg;
 import dev.concord.common.RedisKeys;
-import dev.concord.common.Tokens;
 import dev.concord.crdt.Json;
 import dev.concord.devtools.Dev;
 import dev.concord.session.BoardActor;
@@ -50,35 +49,41 @@ class GatewayTest {
     }
 
     static GatewayMain gateway(String redisUrl) {
-        Map<String, String> env = new HashMap<>();
-        env.put("CONCORD_ENV", "dev");
+        Map<String, String> env = Infra.gatewayEnv();
         env.put("CONCORD_REDIS_URL", redisUrl);
-        env.put("CONCORD_PORT", Integer.toString(Infra.freePort()));
-        env.put("CONCORD_ALLOWED_ORIGINS", "http://allowed.test");
         return new GatewayMain(Config.from(env));
     }
 
     /** A seeded board: users.get(0) is its owner, then editors, then viewers. */
     record Board(String id, List<Map<?, ?>> users) {
-        String token(int i) {
-            return (String) users.get(i).get("token");
+        String session(int i) {
+            return (String) users.get(i).get("session");
+        }
+
+        /** A fresh ticket for user {@code i}, from g1's REST API. */
+        String token(int i) throws Exception {
+            return WsClient.ticket(g1.port(), session(i));
+        }
+
+        String token(int port, int i) throws Exception {
+            return WsClient.ticket(port, session(i));
         }
     }
 
     @SuppressWarnings("unchecked")
     static Board seed(int editors, int viewers) throws Exception {
-        Map<String, Object> s = Dev.seed(Infra.db(), new Tokens(Config.DEV_JWT_SECRET), editors, viewers);
+        Map<String, Object> s = Dev.seed(Infra.db(), editors, viewers);
         return new Board((String) s.get("board"), (List<Map<?, ?>>) s.get("users"));
     }
 
     @Test
-    void upgradeRequiresAValidTokenAndAnAllowedOrigin() throws Exception {
+    void upgradeRequiresAValidTicketAndAnAllowedOrigin() throws Exception {
         Board b = seed(0, 0);
-        assertThrows(Exception.class, () -> new WsClient(g1.port(), "not-a-token", null));
-        assertThrows(Exception.class, () -> new WsClient(g1.port(), b.token(0), "http://evil.test"));
-        // An expired token: minted 16 minutes ago.
-        String old = new Tokens(Config.DEV_JWT_SECRET).mint((String) b.users().get(0).get("id"), java.time.Instant.now().minusSeconds(16 * 60));
-        assertThrows(Exception.class, () -> new WsClient(g1.port(), old, null));
+        assertThrows(Exception.class, () -> new WsClient(g1.port(), "not-a-ticket", null));
+        String t = b.token(0);
+        assertThrows(Exception.class, () -> new WsClient(g1.port(), t, "http://evil.test"));
+        // A session token is not a ticket.
+        assertThrows(Exception.class, () -> new WsClient(g1.port(), b.session(0), null));
         try (WsClient ok = new WsClient(g1.port(), b.token(0), "http://allowed.test"); WsClient script = new WsClient(g1.port(), b.token(0), null)) {
             assertEquals("JOINED", ok.join(b.id(), null).get("type"));
             assertEquals("JOINED", script.join(b.id(), null).get("type"));

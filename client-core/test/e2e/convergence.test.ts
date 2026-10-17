@@ -17,8 +17,8 @@ async function converged(clients: { c: { confirmedHash(): Promise<string>; confi
 describe("convergence across gateways", () => {
   it(`two clients on different gateways converge over ${OPS}+ random ops (seed ${SEED})`, async () => {
     const s = seed(1);
-    const a = await client(s.board, s.users[0]!.token, 0);
-    const b = await client(s.board, s.users[1]!.token, 1);
+    const a = await client(s.board, s.users[0]!.session, 0);
+    const b = await client(s.board, s.users[1]!.session, 1);
     await a.c.until(() => a.c.status === "joined");
     await b.c.until(() => b.c.status === "joined");
     expect(new Set([a.events.find((e) => e.event === "joined"), b.events.find((e) => e.event === "joined")]).size).toBe(2);
@@ -35,7 +35,7 @@ describe("convergence across gateways", () => {
     await a.c.settled(120_000);
     await b.c.settled(120_000);
     const { version, hashes } = await converged([a, b], s.board);
-    const fresh = await client(s.board, s.users[0]!.token, 1); // a third replica, from scratch
+    const fresh = await client(s.board, s.users[0]!.session, 1); // a third replica, from scratch
     await fresh.c.until(() => fresh.c.status === "joined" && fresh.c.confirmedVersion === version);
     const freshHash = await fresh.c.confirmedHash();
 

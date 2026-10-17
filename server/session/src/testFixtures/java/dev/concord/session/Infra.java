@@ -119,6 +119,19 @@ public final class Infra {
         return Config.from(env);
     }
 
+    /** Environment for an in-process gateway: dev, the shared Postgres and Redis, a free port. */
+    public static Map<String, String> gatewayEnv() {
+        start();
+        Map<String, String> env = new HashMap<>();
+        env.put("CONCORD_ENV", "dev");
+        env.put("CONCORD_DB_URL", PG.getJdbcUrl());
+        env.put("CONCORD_DB_POOL", "4");
+        env.put("CONCORD_REDIS_URL", redisUrl());
+        env.put("CONCORD_PORT", Integer.toString(freePort()));
+        env.put("CONCORD_ALLOWED_ORIGINS", "http://allowed.test");
+        return env;
+    }
+
     public static Config config(String instanceId) {
         return config(instanceId, freePort(), false);
     }

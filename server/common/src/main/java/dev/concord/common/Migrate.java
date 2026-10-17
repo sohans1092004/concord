@@ -13,13 +13,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Applies schema.sql (SPEC §5.1) once. Safe to re-run and to run from several processes at once:
- * an advisory lock serialises them and schema_migrations records what was applied.
+ * Brings the database to schema version {@link #VERSION}. A fresh database gets schema.sql
+ * (exactly SPEC §5.1) and every version recorded at once; an older one gets each
+ * migrations/N.sql in turn. Safe to re-run and to run from several processes at once: an
+ * advisory lock serialises them and schema_migrations records what was applied.
  */
 public final class Migrate {
     private static final Logger log = LoggerFactory.getLogger(Migrate.class);
     private static final long LOCK = 0x636f6e636f7264L; // "concord"
-    static final int VERSION = 1;
+    static final int VERSION = 2;
 
     private Migrate() {}
 
@@ -29,39 +31,44 @@ public final class Migrate {
         }
     }
 
-    /** Returns true if this call applied the schema, false if it was already there. */
+    /** Returns true if this call changed the schema, false if it was already current. */
     public static boolean run(DataSource ds) throws SQLException, IOException {
-        String schema;
-        try (InputStream in = Migrate.class.getResourceAsStream("/schema.sql")) {
-            if (in == null) throw new IOException("schema.sql missing from the classpath");
-            schema = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
         try (Connection c = ds.getConnection()) {
             c.setAutoCommit(false);
             try (Statement s = c.createStatement()) {
                 s.execute("SELECT pg_advisory_xact_lock(" + LOCK + ")");
                 s.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())");
             }
-            try (PreparedStatement q = c.prepareStatement("SELECT 1 FROM schema_migrations WHERE version = ?")) {
-                q.setInt(1, VERSION);
-                try (ResultSet r = q.executeQuery()) {
-                    if (r.next()) {
-                        c.commit();
-                        log.info("schema version {} already applied", VERSION);
-                        return false;
-                    }
-                }
+            int current;
+            try (Statement s = c.createStatement(); ResultSet r = s.executeQuery("SELECT coalesce(max(version), 0) FROM schema_migrations")) {
+                r.next();
+                current = r.getInt(1);
+            }
+            if (current >= VERSION) {
+                c.commit();
+                log.info("schema version {} already applied", current);
+                return false;
             }
             try (Statement s = c.createStatement()) {
-                s.execute(schema);
+                if (current == 0) s.execute(resource("/schema.sql"));
+                else for (int v = current + 1; v <= VERSION; v++) s.execute(resource("/migrations/" + v + ".sql"));
             }
             try (PreparedStatement ins = c.prepareStatement("INSERT INTO schema_migrations (version) VALUES (?)")) {
-                ins.setInt(1, VERSION);
-                ins.executeUpdate();
+                for (int v = current + 1; v <= VERSION; v++) {
+                    ins.setInt(1, v);
+                    ins.executeUpdate();
+                }
             }
             c.commit();
-            log.info("schema version {} applied", VERSION);
+            log.info("schema version {} applied (was {})", VERSION, current);
             return true;
+        }
+    }
+
+    private static String resource(String name) throws IOException {
+        try (InputStream in = Migrate.class.getResourceAsStream(name)) {
+            if (in == null) throw new IOException(name + " missing from the classpath");
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 }

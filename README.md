@@ -162,9 +162,9 @@ docker compose -f deploy/docker-compose.yml up -d --build   # the whole stack
 deploy/drills/run-all.sh                                    # every drill, one command
 ```
 
-`devtools` (seed users, boards and members; mint JWTs) is dev-only: it refuses to run unless
-`CONCORD_ENV=dev`, and it signs only with the dev key, which every non-dev server refuses at
-startup (`common/Config.java`), so its tokens cannot validate anywhere else.
+`devtools` (seed users, boards and members with session tokens; list bug reports) is
+dev-only: it refuses to run unless `CONCORD_ENV=dev`, and it needs direct database access.
+Seeded users have no password, so they cannot sign in through the API.
 
 ### Libraries beyond those the brief named
 
@@ -172,6 +172,7 @@ startup (`common/Config.java`), so its tokens cannot validate anywhere else.
 - **Logback** (`logback-classic`): the SLF4J backend; its built-in `JsonEncoder` writes the JSON log lines, so no extra encoder library.
 - **Testcontainers modules `postgresql` and `toxiproxy`**: typed Postgres container, and Toxiproxy to cut the Postgres network after COMMIT (amendment 6 B test) and Redis for one gateway (polling test).
 - **JUnit 5**: already the Phase 1 test framework.
+- **BouncyCastle** (`bcprov-jdk18on`, Phase 3): argon2id password hashing in pure Java; the JDK has no argon2, and the alternative (`argon2-jvm`) needs a native library in the image.
 - Gateway → owner links and test clients use the JDK's `java.net.http.WebSocket`; client-core uses the platform `WebSocket` (Node 22, browsers). No WebSocket library.
 
 ### Exit criteria (SPEC §10, Phase 2), measured
