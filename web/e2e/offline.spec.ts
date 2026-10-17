@@ -32,6 +32,9 @@ test("exit criterion: one browser offline for 200+ edits with a reload, both con
   await pb.getByTestId("card").filter({ hasText: "typed while offline" }).click();
   await pb.getByTestId("card-dialog").getByLabel("Description").fill("written on the train");
   await pb.getByTestId("card-dialog").getByLabel("Close").click();
+  // The description is saved on blur, and an edit counts as pending once its IndexedDB append
+  // lands (amendment 21): wait for that before counting, or the count can be one short.
+  await pb.waitForFunction(() => window.concord!.client.pendingOps().some((o) => o.type === "SET_FIELD" && o.field === "description" && o.value === "written on the train"));
   const before = await pending(pb);
   expect(before).toBeGreaterThanOrEqual(120);
   await expect(pb.getByTestId("pending")).toHaveText(`${before} pending`);
