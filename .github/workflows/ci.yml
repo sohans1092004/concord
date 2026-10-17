@@ -12,7 +12,8 @@ permissions:
 jobs:
   vectors:
     name: vectors are up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +23,8 @@ jobs:
 
   crdt-ts:
     name: crdt-ts (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       matrix:
         node: [20, 22]
@@ -56,13 +58,14 @@ jobs:
 
   crdt-java:
     name: crdt-java
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: crdt-java
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -85,10 +88,11 @@ jobs:
   differential:
     name: differential fuzz (ts vs java)
     needs: crdt-java
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -108,17 +112,51 @@ jobs:
         env:
           DIFF_RUNS: "500"
 
+  # ---- Phase 4a: the trial VM is ARM64 (Oracle Ampere), so the images and the server
+  # tests run on arm64 here first, natively on GitHub's arm64 runner. ------------------------
+
+  arm64:
+    name: arm64 (server tests, production images)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: uname -m && ./gradlew test
+        working-directory: server
+      - name: the production images (runtime, with the web app; backup)
+        run: |
+          docker build -f server/Dockerfile --target runtime -t concord:prod .
+          docker build -f server/Dockerfile --target backup -t concord-backup:prod .
+          docker image inspect concord:prod -f '{{.Architecture}}' | grep -x arm64
+          docker run --rm --entrypoint sh concord-backup:prod -c 'uname -m; java -version 2>&1 | head -1; pg_dump --version; age --version; rclone version | head -1; curl --version | head -1'
+      - name: the image starts and refuses dev values in production
+        run: |
+          out=$(docker run --rm -e CONCORD_ENV=prod concord:prod /app/gateway/bin/gateway 2>&1 || true)
+          echo "$out" | tail -3
+          echo "$out" | grep -q "CONCORD_INTERNAL_SECRET must be at least 32 bytes, and not the dev one, outside dev"
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-test-reports
+          path: server/*/build/reports/tests/
+
   # ---- Phase 2 ------------------------------------------------------------------------------
 
   server:
     name: server (session, gateway; Testcontainers)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -132,7 +170,8 @@ jobs:
 
   client-core:
     name: client-core (unit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: client-core
@@ -148,11 +187,11 @@ jobs:
   e2e:
     name: end to end and drills (docker compose)
     needs: [server, client-core]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -186,7 +225,7 @@ jobs:
   web:
     name: web (Playwright, docker compose)
     needs: [server, client-core]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4

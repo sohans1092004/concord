@@ -12,8 +12,8 @@ permissions:
 jobs:
   ts-fuzz:
     name: crdt-ts fuzz, 100,000 seeds
-    runs-on: ubuntu-latest
-    timeout-minutes: 345
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120 # takes about 1h (ts) and 35m (java)
     defaults:
       run:
         working-directory: crdt-ts
@@ -37,14 +37,14 @@ jobs:
 
   java-fuzz:
     name: crdt-java fuzz, 100,000 seeds
-    runs-on: ubuntu-latest
-    timeout-minutes: 345
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120 # takes about 1h (ts) and 35m (java)
     defaults:
       run:
         working-directory: crdt-java
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -57,11 +57,11 @@ jobs:
 
   differential:
     name: differential fuzz, 5,000 scenarios
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
