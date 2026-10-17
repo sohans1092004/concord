@@ -38,6 +38,9 @@ subprojects {
         maxHeapSize = "1g"
         // A hung test fails with its name and stack trace instead of silently using up the CI job.
         systemProperty("junit.jupiter.execution.timeout.default", "5m")
+        // In a separate thread, so the timeout fails a test even when its thread is blocked on a
+        // monitor (an interrupt cannot reach that; GatewayLogTest on a176a2a hung past it).
+        systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
         // A hang outside any test (a JVM that does not exit) fails the task, so CI uploads reports.
         timeout.set(java.time.Duration.ofMinutes(15))
         testLogging {

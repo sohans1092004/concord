@@ -131,7 +131,7 @@ jobs:
         run: |
           # Thread dumps of any Gradle test JVM still running after 8 minutes (the suite takes ~3):
           # the arm64 job hung twice in :gateway:test (92844f3, 790a65b) without saying where.
-          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; done ) &
+          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; jcmd "$p" Thread.dump_to_file -format=text "/tmp/vthreads-$p.txt" >/dev/null && echo "=== with virtual threads:" && cat "/tmp/vthreads-$p.txt"; done ) &
           dog=$!
           uname -m && ./gradlew test; status=$?
           kill $dog 2>/dev/null; exit $status
@@ -172,7 +172,7 @@ jobs:
         run: |
           # Thread dumps of any Gradle test JVM still running after 8 minutes (the suite takes ~3):
           # the arm64 job hung twice in :gateway:test (92844f3, 790a65b) without saying where.
-          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; done ) &
+          ( sleep 480; for p in $(pgrep -f 'Gradle Test Executor|GradleWorkerMain'); do echo "=== thread dump of $p"; jcmd "$p" Thread.print || true; jcmd "$p" Thread.dump_to_file -format=text "/tmp/vthreads-$p.txt" >/dev/null && echo "=== with virtual threads:" && cat "/tmp/vthreads-$p.txt"; done ) &
           dog=$!
           ./gradlew test; status=$?
           kill $dog 2>/dev/null; exit $status

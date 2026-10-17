@@ -99,3 +99,7 @@ idle-unload-not-reconciling: removed never unloading an idle board while it reco
   test neverUnloadedWhileReconcilingAnUnknownCommitOutcome: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <dev.concord.session.BoardActor@4f541e67> but was: <null>); PASSED with it restored
 idle-unload-subscribers: removed keeping a board loaded while a gateway is subscribed to its channel (amendment 26)
   test anIdleBoardIsUnloadedAndARejoinConverges: FAILED without the guard (org.opentest4j.AssertionFailedError: a board with a subscriber stays loaded ==> expected: not <null>); PASSED with it restored
+
+command: cd server && python tools/guard_checks.py log-redaction-ticket   (2026-10-17T21:27:41Z, after GatewayLogTest's Capture became an UnsynchronizedAppenderBase)
+log-redaction-ticket: removed redacting ticket= and session values in log lines (only access_token= left)
+  test tokensNeverReachTheLogs: FAILED without the guard (secret in encoded output); PASSED with it restored

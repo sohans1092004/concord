@@ -8,7 +8,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.UnsynchronizedAppenderBase;
 import dev.concord.common.Config;
 import dev.concord.common.RedactingJsonEncoder;
 import dev.concord.session.Harness;
@@ -18,6 +18,7 @@ import dev.concord.session.SessionMain;
 import dev.concord.session.Store;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,18 +33,27 @@ import org.slf4j.LoggerFactory;
  */
 class GatewayLogTest {
     /** Captures both the raw event text and what the production encoder writes. */
-    static final class Capture extends AppenderBase<ILoggingEvent> {
-        final List<String> raw = new ArrayList<>(), encoded = new ArrayList<>();
+    /**
+     * Formats and encodes with no lock held, then takes one only to add to the lists, as the
+     * production appender does (Logback's OutputStreamAppender encodes, then locks only around the
+     * write). With AppenderBase, whose doAppend is synchronized, formatting ran under this
+     * appender's monitor: formatting can call any toString(), and with every logger at TRACE a
+     * thread holding a Jetty lock was logging too, so CI on a176a2a deadlocked here (arm64, every
+     * blocked thread waiting for this monitor, held by a virtual thread).
+     */
+    static final class Capture extends UnsynchronizedAppenderBase<ILoggingEvent> {
+        final List<String> raw = Collections.synchronizedList(new ArrayList<>()), encoded = Collections.synchronizedList(new ArrayList<>());
         final RedactingJsonEncoder encoder = new RedactingJsonEncoder();
 
         @Override
-        protected synchronized void append(ILoggingEvent e) {
+        protected void append(ILoggingEvent e) {
             StringBuilder b = new StringBuilder(String.valueOf(e.getFormattedMessage()));
             if (e.getKeyValuePairs() != null) e.getKeyValuePairs().forEach(kv -> b.append(' ').append(kv.key).append('=').append(kv.value));
             if (e.getThrowableProxy() != null) b.append(' ').append(e.getThrowableProxy().getMessage());
             e.getMDCPropertyMap().forEach((k, v) -> b.append(' ').append(k).append('=').append(v));
-            raw.add(b.toString());
-            encoded.add(new String(encoder.encode(e), StandardCharsets.UTF_8));
+            String line = b.toString(), json = new String(encoder.encode(e), StandardCharsets.UTF_8);
+            raw.add(line);
+            encoded.add(json);
         }
     }
 
@@ -105,7 +115,7 @@ class GatewayLogTest {
         List<String> tokens = new ArrayList<>();
         Capture prod = exercise(Level.INFO, tokens);
         assertTrue(prod.raw.size() > 0, "expected some log events");
-        for (String line : prod.raw)
+        for (String line : List.copyOf(prod.raw)) // a snapshot: a late append may still be finishing
             for (String t : tokens) assertFalse(line.contains(t), "secret in a log line: " + line);
 
         // With every logger at TRACE (Jetty logs request lines there), the encoder's output still
@@ -113,7 +123,7 @@ class GatewayLogTest {
         List<String> tokens2 = new ArrayList<>();
         Capture trace = exercise(Level.TRACE, tokens2);
         boolean redactedSomething = false;
-        for (String line : trace.encoded) {
+        for (String line : List.copyOf(trace.encoded)) {
             for (String t : tokens2) assertFalse(line.contains(t), "secret in encoded output: " + line);
             redactedSomething |= line.contains("=REDACTED") || line.contains("Bearer REDACTED");
         }
