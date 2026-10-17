@@ -107,6 +107,22 @@ CHECKS = {
         "re-keying equal upper neighbours before an insert (SPEC 3.7 rule B)",
         [(CLIENT, "    for (const r of plan.rekeys) this.submit(rekey(entries[r.index]!.id, r.key));\n", "")],
         "vitest:test/unit/features.test.ts", True),
+    "silence-drop": (
+        "dropping a joined connection after 15s of silence (amendment 18)",
+        [(CLIENT, "if (this.now() - this.lastHeard > SILENCE_MS) this.dropConnection(\"silent\");", "void SILENCE_MS;")],
+        "vitest:test/unit/features.test.ts", True),
+    "offline-event": (
+        "reacting to the browser's offline event (amendment 18)",
+        [(CLIENT, "    g.addEventListener?.(\"offline\", this.onOffline);\n", "")],
+        "vitest:test/unit/features.test.ts", True),
+    "duplicate-tab-lock": (
+        "taking the Web Lock for the remembered replica ID, so a duplicated tab makes its own (amendment 17)",
+        [(IDB, "let lock = id ? await tryLock(lockName(boardId, id)) : null;", "let lock = id ? { release: () => {} } : null;")],
+        "pw:e2e/offline.spec.ts:86", True),
+    "adoption-lock": (
+        "taking a saved replica's Web Lock before adopting it (SPEC 7.1)",
+        [(IDB, "const lock = await tryLock(lockName(this.boardId, row.tabReplicaId));", "const lock = { release: () => {} };")],
+        "pw:e2e/offline.spec.ts:114", True),
     # Drill checks: the Session image is rebuilt with the guard removed and the drill run
     # against the compose stack (deploy/docker-compose.yml must be up), then restored.
     "fence-counter-rebuild": (
@@ -130,6 +146,8 @@ def run_check(test):
     if kind == "vitest":
         return node(REPO / "client-core", ["vitest", "run", rest])
     if kind == "pw":
+        # The preview server serves the built app, so rebuild it from the edited source first.
+        subprocess.run([shutil.which("npx") or "npx", "vite", "build"], cwd=REPO / "web", capture_output=True)
         return node(REPO / "web", ["playwright", "test", rest])
     return gradle(test)
 

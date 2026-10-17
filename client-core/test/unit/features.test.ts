@@ -1,8 +1,8 @@
 // client-core's Phase 3 features against a scripted fake gateway: equal-key inserts (§3.7),
 // "moved by" (§3.5), the trash view, presence (§7.5), labels (§4.2) and the member map.
 import { Board, hlc as H, type Op } from "@concord/crdt";
-import { describe, expect, it } from "vitest";
-import { MemoryStorage, MOVED_BY_MS, normalizeLabels, SyncClient, type Socket } from "../../src/index.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryStorage, MOVED_BY_MS, normalizeLabels, SILENCE_MS, SyncClient, type Socket } from "../../src/index.js";
 
 const BOARD = "b0a4d000-0000-4000-8000-000000000002";
 const T0 = 1_760_000_000_000;
@@ -188,5 +188,69 @@ describe("trash, presence, labels", () => {
     expect(() => normalizeLabels(Array.from({ length: 21 }, (_, i) => `l${i}`))).toThrow(/20/);
     expect(() => normalizeLabels(["x".repeat(51)])).toThrow(/50/);
     expect(normalizeLabels(["😀".repeat(50)])).toHaveLength(1); // 50 code points, 100 UTF-16 units
+  });
+});
+
+describe("§7.3 liveness (amendment 18)", () => {
+  async function fakeTimed() {
+    vi.useFakeTimers();
+    const listeners: Record<string, () => void> = {};
+    vi.stubGlobal("addEventListener", (t: string, f: () => void) => (listeners[t] = f));
+    vi.stubGlobal("removeEventListener", () => {});
+    const sockets: FakeSocket[] = [];
+    const client = await SyncClient.open({
+      urls: ["ws://g/ws"], boardId: BOARD, ticket: () => "t", storage: new MemoryStorage(), random: () => 0,
+      connect: (url) => {
+        const s = new FakeSocket(url);
+        sockets.push(s);
+        return s;
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    const join = () => {
+      const ws = sockets.at(-1)!;
+      ws.readyState = 1;
+      ws.onopen?.({});
+      ws.push({ type: "JOINED", snapshot: Board.empty().encode(), version: 0, server_time_ms: Date.now(), role: "editor" });
+    };
+    join();
+    return { client, sockets, listeners, join };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("a joined connection that hears nothing for 15s is dropped and re-dialled", async () => {
+    const { client, sockets } = await fakeTimed();
+    expect(client.status).toBe("joined");
+    await vi.advanceTimersByTimeAsync(SILENCE_MS + 5_001);
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(sockets.length).toBeGreaterThan(1); // reconnecting on its own
+    client.close();
+  });
+
+  it("BOARD_VERSION every 5s keeps it alive", async () => {
+    const { client, sockets } = await fakeTimed();
+    for (let i = 0; i < 8; i++) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      sockets[0]!.push({ type: "BOARD_VERSION", version: 0 });
+    }
+    expect(client.status).toBe("joined");
+    expect(sockets).toHaveLength(1);
+    client.close();
+  });
+
+  it("the browser's offline event drops the socket at once; online reconnects without waiting for backoff", async () => {
+    const { client, sockets, listeners } = await fakeTimed();
+    listeners.offline!();
+    expect(client.status).toBe("offline");
+    expect(sockets[0]!.readyState).toBe(3);
+    const before = sockets.length;
+    listeners.online!();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets.length).toBe(before + 1);
+    client.close();
   });
 });

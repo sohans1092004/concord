@@ -628,6 +628,15 @@ never discards an unacknowledged edit, whatever the server sends back.
 - Each tab is its own replica with its own ID, so two tabs never share an HLC sequence.
   On start, a tab takes over the queues of closed tabs, using the Web Locks API so only
   one tab adopts each queue.
+- A tab keeps its replica ID in `sessionStorage`, so a reload resumes the same replica, and
+  holds the Web Lock `concord:replica:{board}:{replica}` for as long as it lives. A duplicated
+  tab inherits a copy of `sessionStorage`, so on start a tab takes the lock for its stored ID
+  and, if another tab holds it, makes a new replica ID. Each replica's state is one IndexedDB
+  record. Adopting a closed tab's record takes that record's lock first; its pending ops and
+  Unsent edits go to the front of the adopting tab's queue, keeping their `op_id`, HLC and
+  replica ID; writing the merged record and deleting the adopted one is one IndexedDB
+  transaction. The app shell is cached by a service worker, so a reload while offline opens
+  the board from IndexedDB.
 
 ### 7.2 Edit
 
@@ -638,7 +647,11 @@ never discards an unacknowledged edit, whatever the server sends back.
 
 ### 7.3 Reconnect
 
-1. Reconnect with backoff: 0.5s × 2, capped at 30s, full jitter.
+1. Reconnect with backoff: 0.5s × 2, capped at 30s, full jitter. A joined connection that
+   receives nothing for 15s is treated as lost and reconnected (the owner publishes
+   `BOARD_VERSION` every 5s, §6.4): a dropped network often leaves a WebSocket open with no
+   close event. In a browser the client also drops the socket on the `offline` event and
+   reconnects at once, without waiting for backoff, on `online`.
 2. Send `JOIN {board_id, since_version}`.
 3. The server replies with ops after that version, or with a full snapshot if the client is
    more than 2,000 ops behind or behind the oldest kept op.
@@ -1007,3 +1020,5 @@ section text itself is updated in the same commit.
 | 14 | 2026-10-17 | §5.1, §9.4 | Sign-in as in Reliant, no JWTs: hashed 30-day session cookie (or Bearer for scripts), argon2id, per-email and per-IP sign-in limits, optional invite code; changing the password revokes other sessions; Origin checked on every state-changing REST call. The WebSocket URL carries a single-use 30s ticket stored hashed in Postgres; expired tickets and sessions are deleted every minute. `users.name`, `sessions`, `ws_tickets` and `bug_reports` added to §5.1. The JWT code, config and secret are deleted. |
 | 15 | 2026-10-17 | §7.5 | `OP_BROADCAST` and each `ops` entry of `JOINED` and `SYNC` carry the sender's `user_id`; `JOINED` carries the board's member map, `user_id` → `{name, role}`. |
 | 16 | 2026-10-17 | §5.2, §7.5 | Presence specified: `state` is `active` or `idle`; client sends on join, on change and every 10s; gateway-only, in Redis, never Postgres; snapshot after `JOINED`; `left` on disconnect and from each gateway's 10s sweep, idempotent on the client (`PresenceTest`, guard checks `presence-sweep`, `presence-joined-board`). |
+| 17 | 2026-10-17 | §7.1 | Tab replicas: replica ID in `sessionStorage`, held by a Web Lock; a duplicated tab whose stored ID is locked makes a new one (`offline.spec.ts`, guard check `duplicate-tab-lock`). Adoption takes the record's lock first and is one IndexedDB transaction (guard check `adoption-lock`). A service worker caches the app shell for offline reloads. |
+| 18 | 2026-10-17 | §7.3 | Liveness: 15s with no message drops a joined connection and reconnects; the browser's `offline` event drops it at once and `online` reconnects without backoff. Found by the Phase 3 offline test: Chromium's offline mode, like a dropped network, leaves the WebSocket open (guard checks `silence-drop`, `offline-event`). |

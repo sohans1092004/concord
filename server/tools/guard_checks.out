@@ -59,3 +59,13 @@ presence-sweep: removed removing presence entries older than 30s in the sweep (S
   test sweepRemovesStaleEntriesAndAnnouncesOnlyUsersWhoAreGone: FAILED without the guard (org.opentest4j.AssertionFailedError: expected: <[f267e32f-4e82-4fe5-8548-d4332a657a8c:-:idle]> but was: <[b9cd24f8-0f68-4481-8017-f5c24eefaeb4:-:active, f267e32f-4e82-4fe5-8548-d4332a657a8c:-:active, ); PASSED with it restored
 presence-joined-board: removed the check that a PRESENCE frame names the connection's joined board
   test presenceFlowsWithTheGatewaysPostgresCutOffAndStaysOnItsBoard: FAILED without the guard (java.lang.AssertionError: no matching message within 10s); PASSED with it restored
+
+Command: cd server && python tools/guard_checks.py silence-drop offline-event duplicate-tab-lock adoption-lock   (2026-10-17; pw checks rebuild web/ and run against the compose stack)
+silence-drop: removed dropping a joined connection after 15s of silence (amendment 18)
+  test vitest:test/unit/features.test.ts: FAILED without the guard (AssertionError: expected 1 to be 3 // Object.is equality); PASSED with it restored
+offline-event: removed reacting to the browser's offline event (amendment 18)
+  test vitest:test/unit/features.test.ts: FAILED without the guard (TypeError: listeners.offline is not a function); PASSED with it restored
+duplicate-tab-lock: removed taking the Web Lock for the remembered replica ID, so a duplicated tab makes its own (amendment 17)
+  test pw:e2e/offline.spec.ts:86: FAILED without the guard (Error: expect(received).not.toBe(expected) // Object.is equality); PASSED with it restored
+adoption-lock: removed taking a saved replica's Web Lock before adopting it (SPEC 7.1)
+  test pw:e2e/offline.spec.ts:114: FAILED without the guard (Error: expect(received).toEqual(expected) // deep equality); PASSED with it restored

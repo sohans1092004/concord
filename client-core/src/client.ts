@@ -103,6 +103,13 @@ export interface ClientOptions {
 /** A connection that has not reached JOINED by then is abandoned (a hung handshake or owner). */
 export const JOIN_TIMEOUT_MS = 10_000;
 
+/**
+ * §7.3 (amendment 18): a joined connection that hears nothing for this long is dead. The owner
+ * publishes BOARD_VERSION every 5s (§6.4), so silence means the network went away without
+ * closing the socket (a dropped Wi-Fi, a laptop lid), which no WebSocket event reports.
+ */
+export const SILENCE_MS = 15_000;
+
 /** SPEC §7.3 step 1: 0.5s × 2^attempt, capped at 30s, full jitter. */
 export function backoffMs(attempt: number, random: () => number): number {
   return random() * Math.min(30_000, 500 * 2 ** attempt);
@@ -143,6 +150,17 @@ export class SyncClient {
   private readonly presence_ = new Map<string, Presence>();
   private myPresence: { cardId: string | null; state: "active" | "idle" } | null = null;
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHeard = 0;
+  private silenceTimer: ReturnType<typeof setInterval> | null = null;
+  /** Browser network events, when there is a browser: offline drops the socket, online reconnects now. */
+  private readonly onOffline = () => this.dropConnection("browser_offline");
+  private readonly onOnline = () => {
+    if (this.status_ !== "offline" || !this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.attempt = 0;
+    this.log("browser_online", {});
+    void this.connect();
+  };
 
   private readonly storage: Storage;
   private readonly connectFn: (url: string) => Socket;
@@ -158,6 +176,9 @@ export class SyncClient {
     this.logFn = opts.log ?? (() => {});
     this.urlIndex = Math.floor(this.random() * opts.urls.length);
     this.replicaId = this.storage.replicaId ?? this.replicaId;
+    const g = globalThis as { addEventListener?: (t: string, f: () => void) => void };
+    g.addEventListener?.("offline", this.onOffline);
+    g.addEventListener?.("online", this.onOnline);
     this.clock = H.zero(this.replicaId);
   }
 
@@ -272,19 +293,19 @@ export class SyncClient {
     return op as Op;
   }
 
-  /** Adds a list at `index` (default: last). Returns its ID. */
+  /** Adds a list at `index` (default, or past the end: last). Returns its ID. */
   addList(title: string, index?: number): string {
     const lists = this.lists();
-    const key = this.placeAt(lists, index ?? lists.length, (id, k) => ({ type: "SET_PLACEMENT", entity_id: id, placement: { position_key: k } }));
+    const key = this.placeAt(lists, Math.min(index ?? lists.length, lists.length), (id, k) => ({ type: "SET_PLACEMENT", entity_id: id, placement: { position_key: k } }));
     const id = O.newOpId();
     this.submit({ type: "ADD_LIST", list_id: id, placement: { position_key: key }, title });
     return id;
   }
 
-  /** Adds a card to `listId` at `index` (default: last). Returns its ID. */
+  /** Adds a card to `listId` at `index` (default, or past the end: last). Returns its ID. */
   addCard(listId: string, title: string, index?: number): string {
     const cards = this.cardsOf(listId);
-    const key = this.placeAt(cards, index ?? cards.length, (id, k) => ({ type: "SET_PLACEMENT", entity_id: id, placement: { list_id: listId, position_key: k } }));
+    const key = this.placeAt(cards, Math.min(index ?? cards.length, cards.length), (id, k) => ({ type: "SET_PLACEMENT", entity_id: id, placement: { list_id: listId, position_key: k } }));
     const id = O.newOpId();
     this.submit({ type: "ADD_CARD", card_id: id, placement: { list_id: listId, position_key: key }, title });
     return id;
@@ -340,6 +361,9 @@ export class SyncClient {
   close(): void {
     this.status_ = "closed";
     this.clearTimers();
+    const g = globalThis as { removeEventListener?: (t: string, f: () => void) => void };
+    g.removeEventListener?.("offline", this.onOffline);
+    g.removeEventListener?.("online", this.onOnline);
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
     const ws = this.ws;
@@ -389,6 +413,7 @@ export class SyncClient {
     ws.onopen = () => this.send({ type: "JOIN", board_id: this.opts.boardId, since_version: this.version });
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      this.lastHeard = this.now();
       try {
         this.handle(JSON.parse(String(ev.data)) as Msg);
       } catch (e) {
@@ -401,8 +426,24 @@ export class SyncClient {
     ws.onerror = () => {};
   }
 
+  /** The socket is dead or about to be: stop using it and reconnect with backoff. */
+  private dropConnection(why: string): void {
+    const ws = this.ws;
+    if (!ws) return;
+    this.log("connection_dropped", { why });
+    this.ws = null; // ignore whatever this socket does from now on
+    try {
+      ws.close(4001, why);
+    } catch {
+      // already closed
+    }
+    this.disconnected();
+  }
+
   private disconnected(): void {
     this.ws = null;
+    if (this.silenceTimer) clearInterval(this.silenceTimer);
+    this.silenceTimer = null;
     if (this.joinTimer) clearTimeout(this.joinTimer);
     this.joinTimer = null;
     this.syncInFlight = false;
@@ -446,6 +487,10 @@ export class SyncClient {
         this.log("joined", { version: this.version, pending: this.pending.length });
         for (const op of this.pending) this.send({ type: "OP", op }); // step 5: resend the queue
         this.sendPresence();
+        if (this.silenceTimer) clearInterval(this.silenceTimer);
+        this.silenceTimer = setInterval(() => {
+          if (this.now() - this.lastHeard > SILENCE_MS) this.dropConnection("silent");
+        }, SILENCE_MS / 3);
         if (this.presenceTimer) clearInterval(this.presenceTimer);
         this.presenceTimer = setInterval(() => this.sendPresence(), PRESENCE_EVERY_MS);
         break;
@@ -726,6 +771,8 @@ export class SyncClient {
   }
 
   private clearTimers(): void {
+    if (this.silenceTimer) clearInterval(this.silenceTimer);
+    this.silenceTimer = null;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.joinTimer) clearTimeout(this.joinTimer);
     if (this.syncTimer) clearTimeout(this.syncTimer);
