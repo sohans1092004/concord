@@ -49,9 +49,23 @@ projection: a board used daily for 30 days, assuming 500 ops a day of which 50 d
 - 13:02 UTC a first launch was stopped (TaskStop) and the stack reset with fresh volumes; on this
   Windows machine stopping the task killed only its shell, and its vitest process kept running
   against the new stack. Its users had been deleted with the volumes, so it got 401 for tickets and
-  its churn clients never joined; it wrote those errors into the same log file as run 2. It had
-  exited by 13:52 UTC (only run 2's processes were left). Run 2's own counter: errors 0 in every
+  its churn clients never joined; it wrote those errors into the same log file as run 2. It ended
+  at about 13:07:50 UTC (its summary: started 13:02:38, 310s; its 5-minute heap sample threw), so it
+  overlapped run 2 for about 4 minutes at the start of the first hour. Run 2's own counter: errors 0 in every
   sample. The verdict window (minute 60 on, from ~14:03 UTC) is after it was gone.
 - Found while reading this: a churn client that failed to join was never closed and kept retrying
   for the rest of the run. Fixed in the harness (closed in finally; failing clients' last events
   are now printed) for later runs; run 2 started before the fix.
+
+# Memory soak, run 2: 2026-10-17 13:03:33-15:08:44 UTC, production compose (deploy/prod/compose.yaml + deploy/soak/compose.soak.yaml: Caddy on 127.0.0.1:8088 only), fixed-card workload
+command: SOAK_TARGET=prod SOAK_ORIGIN=https://<CONCORD_DOMAIN> SOAK_INVITE=<code> SOAK_MINUTES=125 npx vitest run test/soak  (client-core); python deploy/soak/verdict.py deploy/soak/2026-10-17T13-03-34-691Z.jsonl
+JVMs: gateway -Xmx256m in 512m, session1/2 -Xms64m -Xmx384m in 640m (Serial GC, as production); amendment 26 in
+
+26 samples, minutes 0..125; second hour: 14 samples
+JVM                     first MB  h2 start    h2 end   h2 min   h2 max  slope MB/h   limit  verdict
+concord-soak-gateway-1      17.5      16.7      16.9     16.7     18.0       -0.01     2.0  flat
+concord-soak-session1-1      12.5      15.6      14.3     14.2     15.6       -0.16     2.0  flat
+concord-soak-session2-1      12.4      15.7      14.3     14.2     15.7       -0.00     2.0  flat
+load: {'edits': 118863, 'connections': 5343, 'slow': 62, 'errors': 0}
+
+RESULT: PASSED. Heap after a full GC flat across the second hour on every JVM; 0 errors. Each board's ACK cache filled (10,000 ops) at about minute 44, inside the first hour.
