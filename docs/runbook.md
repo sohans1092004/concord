@@ -282,8 +282,8 @@ Afterwards it deletes both test accounts, and with them the board. It ends with
 
 | Task | How |
 |---|---|
-| Deploy a new version | Wait until that commit's CI run is green, including "publish images". Then `cd ~/concord && git pull && deploy/prod/deploy.sh <full SHA>`: a backup with the running version, pull, migrations, then the Session instances one at a time and the gateway. Clients reconnect on their own and lose nothing. It ends by printing the rollback command |
-| Roll back | `deploy/prod/deploy.sh <previous SHA>`, the command the last deploy printed: the same steps, back to the old images. Migrations are forward-only and must keep the previous version working (add, never rename or drop), so the older code runs on the newer schema. Find older SHAs with `git log --oneline` or under GitHub → Actions |
+| Deploy a new version | Wait until that commit's CI run is green, including "publish images". Then `cd ~/concord && git fetch && git checkout --detach <full SHA> && deploy/prod/deploy.sh <full SHA>` (the script refuses if the checkout and the images differ, since the Caddyfile and compose file come from the checkout): a backup with the running version, pull, migrations, then the Session instances one at a time and the gateway. Clients reconnect on their own and lose nothing. It ends by printing the rollback command |
+| Roll back | `git checkout --detach <previous SHA> && deploy/prod/deploy.sh <previous SHA>`, the SHA the last deploy printed: the same steps, back to the old images. Migrations are forward-only and must keep the previous version working (add, never rename or drop), so the older code runs on the newer schema. Find older SHAs with `git log --oneline` or under GitHub → Actions |
 | Logs | `cd ~/concord/deploy/prod && docker compose logs -f --since 1h gateway` (JSON lines; also `session1`, `session2`, `caddy`, `backup`). Docker keeps 5 × 10 MB per container |
 | Memory | `free -m`, `docker stats --no-stream`, and per JVM `docker compose exec gateway jcmd 1 GC.heap_info` (also `session1`, `session2`). Limits and what is normal: section 11 |
 | A backup now | `docker compose exec backup /app/backup/backup.sh` |
