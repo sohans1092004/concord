@@ -240,7 +240,7 @@ describe("§10.1 measurements", () => {
     await sleep(10_000);
     const r = await window(lat, clients, Number(process.env.LOAD_SECONDS ?? 60));
     await load.stop();
-    console.log(`LOAD ${JSON.stringify({ test: "batching", batch_ms: Number(process.env.CONCORD_BATCH_MS ?? "15"), editors: 30, ...r })}`);
+    console.log(`LOAD ${JSON.stringify({ test: "batching", batch_ms: Number(process.env.CONCORD_BATCH_MS ?? "5"), editors: 30, ...r })}`);
     for (const c of clients) c.close();
   }, 900_000);
 
@@ -431,8 +431,9 @@ describe("§10.1 measurements", () => {
         const version = () => Number(psql(`SELECT version FROM boards WHERE id = '${seeded.board}'`)[0]);
         // Pad to a multiple of 500 (a snapshot falls there), then add the tail.
         const card = cs[0]!.view().lists[0]!.cards[0]!.id;
+        let renamed = 0; // no database read per rename: the tail must land within the 60s snapshot timer
         const renames = async (n: number) => {
-          for (let k = 0; k < n; k++) cs[0]!.setField(card, "title", `rename ${version()}-${k}`);
+          for (let k = 0; k < n; k++) cs[0]!.setField(card, "title", `rename ${renamed++}`);
           await cs[0]!.settled(300_000);
         };
         await renames((500 - (version() % 500)) % 500);

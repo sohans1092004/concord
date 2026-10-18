@@ -1,0 +1,27 @@
+command: (cd client-core && LOAD=recovery npx vitest run test/load)
+commit: 816037b + uncommitted changes
+started: 2026-10-18T11:21:33Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > recovery
+LOAD {"test":"recovery","cards":10,"board_version":500,"snapshot_version":500,"tail_ops":0,"snapshot_json_bytes":5186,"killed":"session3","new_owner":"session1","claims_on_new_owner":1,"claim_ms":61,"kill_to_first_ack_ms":19799}
+
+stdout | test/load/load.test.ts > §10.1 measurements > recovery
+LOAD {"test":"recovery","cards":10,"board_version":999,"snapshot_version":500,"tail_ops":499,"snapshot_json_bytes":5186,"killed":"session1","new_owner":"session2","claims_on_new_owner":1,"claim_ms":29,"kill_to_first_ack_ms":13273}
+
+stdout | test/load/load.test.ts > §10.1 measurements > recovery
+LOAD {"test":"recovery","cards":2000,"board_version":2500,"snapshot_version":2500,"tail_ops":0,"snapshot_json_bytes":941819,"killed":"session1","new_owner":"session2","claims_on_new_owner":1,"claim_ms":77,"kill_to_first_ack_ms":20277}
+
+stdout | test/load/load.test.ts > §10.1 measurements > recovery
+LOAD {"test":"recovery","cards":2000,"board_version":2999,"snapshot_version":2500,"tail_ops":499,"snapshot_json_bytes":942135,"killed":"session2","new_owner":"session3","claims_on_new_owner":3,"claim_ms":342,"kill_to_first_ack_ms":15679}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 346664ms
+   ✓ §10.1 measurements > recovery  346662ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  16:51:36
+   Duration  347.48s (transform 224ms, setup 0ms, collect 278ms, tests 346.66s, environment 0ms, prepare 221ms)
+
+ended: 2026-10-18T11:27:23Z

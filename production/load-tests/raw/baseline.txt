@@ -1,0 +1,18 @@
+command: (cd client-core && LOAD=baseline npx vitest run test/load)
+commit: 816037b
+started: 2026-10-18T10:48:47Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > baseline
+LOAD {"test":"baseline","clients":2,"seconds":120,"samples":239,"p50":27,"p95":32,"p99":33,"max":60,"committed_ops_per_s":2,"commits_per_s":2,"ops_per_commit":1}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 128149ms
+   ✓ §10.1 measurements > baseline  128147ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  16:18:52
+   Duration  129.51s (transform 416ms, setup 0ms, collect 502ms, tests 128.15s, environment 0ms, prepare 298ms)
+
+ended: 2026-10-18T10:51:02Z

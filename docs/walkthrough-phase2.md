@@ -107,7 +107,7 @@ state. Exactly one Session instance, the board's *owner*, holds a board in memor
 ## 6. The group commit (SPEC §6.1 step 3, amendment 6)
 
 21. The op is parsed (`BoardActor.java:259`) and added to the batch (`BoardActor.java:263`).
-    The first op of a batch sets its deadline, 15ms away by default, `BoardActor.java:260`.
+    The first op of a batch sets its deadline, 5ms away by default (15ms when this was written; amendment 32), `BoardActor.java:260`.
 22. When the deadline passes, `serveOnce` calls `flush`, `BoardActor.java:209` →
     `BoardActor.java:351`, which runs one transaction for the whole batch,
     `Store.commit`, `BoardActor.java:360` → `Store.java:53`:

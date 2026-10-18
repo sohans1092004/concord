@@ -27,9 +27,9 @@ x-env: &env
   # Traces (SPEC 9.5): off unless set, e.g. CONCORD_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
   # with --profile observability (Jaeger joins the stack).
   CONCORD_OTLP_ENDPOINT: ${CONCORD_OTLP_ENDPOINT:-}
-  # Group-commit window (SPEC 6.1 step 3); production keeps the default, 15. The commit-batching
+  # Group-commit window (SPEC 6.1 step 3); production keeps the default, 5 (ADR-005). The commit-batching
   # measurement (production/load-tests) restarts the Session instances with 0, 5, 15 and 30.
-  CONCORD_BATCH_MS: ${CONCORD_BATCH_MS:-15}
+  CONCORD_BATCH_MS: ${CONCORD_BATCH_MS:-5}
 
 x-session: &session
   <<: *server

@@ -1,0 +1,39 @@
+command: (cd client-core && LOAD=editors npx vitest run test/load)
+commit: 816037b
+started: 2026-10-18T10:51:02Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":2,"seconds":30,"samples":60,"p50":29,"p95":33,"p99":37,"max":37,"committed_ops_per_s":2,"commits_per_s":2,"ops_per_commit":1}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":5,"seconds":30,"samples":596,"p50":29,"p95":41,"p99":46,"max":48,"committed_ops_per_s":5,"commits_per_s":5,"ops_per_commit":1}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":10,"seconds":30,"samples":2682,"p50":29,"p95":45,"p99":94,"max":264,"committed_ops_per_s":9.9,"commits_per_s":9.9,"ops_per_commit":1}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":15,"seconds":30,"samples":6272,"p50":29,"p95":35,"p99":38,"max":55,"committed_ops_per_s":14.8,"commits_per_s":13,"ops_per_commit":1.14}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":20,"seconds":30,"samples":11324,"p50":29,"p95":36,"p99":39,"max":43,"committed_ops_per_s":19.8,"commits_per_s":14.5,"ops_per_commit":1.37}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":25,"seconds":30,"samples":17904,"p50":31,"p95":42,"p99":47,"max":54,"committed_ops_per_s":24.8,"commits_per_s":13.5,"ops_per_commit":1.84}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","editors":30,"seconds":30,"samples":25926,"p50":33,"p95":42,"p99":44,"max":50,"committed_ops_per_s":29.7,"commits_per_s":15.6,"ops_per_commit":1.9}
+
+stdout | test/load/load.test.ts > §10.1 measurements > editors
+LOAD {"test":"editors","at":30,"acked":3756,"board_version":3756,"converged":true,"acked_missing":0,"unsent":0}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 257307ms
+   ✓ §10.1 measurements > editors  257303ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  16:21:06
+   Duration  258.53s (transform 423ms, setup 0ms, collect 515ms, tests 257.31s, environment 0ms, prepare 340ms)
+
+ended: 2026-10-18T10:55:25Z

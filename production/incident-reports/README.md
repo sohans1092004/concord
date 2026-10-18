@@ -31,5 +31,6 @@ Postmortems in Reliant's format: what broke, impact, detection, root cause, fix,
 | [018](018-board-deleted-while-loaded.md) | A board deleted while its owner had it loaded | Live trial host logs | Amendment 27, `f21aac5` |
 | [019](019-metrics-public-on-the-trial-host.md) | `/metrics` public on the trial host; two deploys did not close it | Building observability; `deploy.sh`'s new check | `eca3941`, `41b6b9a`, `e274eba` |
 | [020](020-telemetry-report-over-the-cap.md) | The client could send a 101-item telemetry report | Unit test, before deploy | `eca3941` |
+| [021](021-offline-queue-drained-slowly.md) | A long offline queue took far too long to sync (8h: 487s; 24h: unfinished after 10 min) | §10.1 offline measurement | Amendment 31, `816037b` |
 
 **Trial bug reports:** none received so far. The in-app reports land in `bug_reports`, and the daily `summary.sh` counts them; each one that reveals a bug will get a report here.

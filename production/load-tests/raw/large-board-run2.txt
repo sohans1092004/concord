@@ -1,0 +1,41 @@
+command: (cd web && npx playwright test e2e/perf.spec.ts)   (second run, to see whether the outliers repeat)
+commit: 816037b
+started: 2026-10-18T11:29:37Z
+
+Running 1 test using 1 worker
+
+perf: 2000 cards, 10 editors, 60s, 581 edits sent, seed 13941ms; update render ms: n=600 p50=4.90 p95=9.10 p99=13.80 max=26.30 (2 of 600 at or over 16ms); long tasks: 0 ()
+  ✘  1 e2e\perf.spec.ts:47:1 › 2,000 cards, 10 editors: each update renders in under 16ms (1.3m)
+
+
+  1) e2e\perf.spec.ts:47:1 › 2,000 cards, 10 editors: each update renders in under 16ms ────────────
+
+    Error: every update must render in under 16ms
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 16
+    Received:   26.30000001192093
+
+      161 |   // shared runner is a regression guard on p95 only. The numbers above are recorded either way.
+      162 |   if (process.env.CI) expect(s.p95, "CI regression guard: p95 under 25ms").toBeLessThan(25);
+    > 163 |   else expect(s.max, "every update must render in under 16ms").toBeLessThan(16);
+          |                                                                ^
+      164 |   await ctx.close();
+      165 | });
+      166 |
+        at C:\Users\sohan\OneDrive\Desktop\STUDY\Projects\Sde\Concord\web\e2e\perf.spec.ts:163:64
+
+    Error Context: test-results\perf-2-000-cards-10-editor-3b1d3-pdate-renders-in-under-16ms\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\perf-2-000-cards-10-editor-3b1d3-pdate-renders-in-under-16ms\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\perf-2-000-cards-10-editor-3b1d3-pdate-renders-in-under-16ms\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\perf.spec.ts:47:1 › 2,000 cards, 10 editors: each update renders in under 16ms ─────────────
+ended: 2026-10-18T11:31:10Z

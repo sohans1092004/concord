@@ -1,0 +1,18 @@
+command: (cd client-core && LOAD=inflight npx vitest run test/load)
+commit: 816037b
+started: 2026-10-18T11:01:38Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > inflight
+LOAD {"test":"inflight","seconds":30,"ops":649,"ops_per_s":21.6,"ack_ms":{"samples":649,"p50":47,"p95":65,"p99":68,"max":243},"commits":649}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 31806ms
+   ✓ §10.1 measurements > inflight  31802ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  16:31:41
+   Duration  32.94s (transform 490ms, setup 0ms, collect 399ms, tests 31.81s, environment 0ms, prepare 315ms)
+
+ended: 2026-10-18T11:02:14Z

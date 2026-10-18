@@ -54,7 +54,7 @@ public record Config(
                 e.getOrDefault("CONCORD_INSTANCE_ID", UUID.randomUUID().toString()),
                 e.getOrDefault("CONCORD_ADVERTISE", "ws://localhost:" + e.getOrDefault("CONCORD_PORT", "7000") + "/internal"),
                 Integer.parseInt(e.getOrDefault("CONCORD_PORT", "7000")),
-                Integer.parseInt(e.getOrDefault("CONCORD_BATCH_MS", "15")),
+                Integer.parseInt(e.getOrDefault("CONCORD_BATCH_MS", "5")),
                 Arrays.stream(e.getOrDefault("CONCORD_ALLOWED_ORIGINS", "http://localhost:5173").split(","))
                         .map(String::trim).filter(s -> !s.isEmpty()).toList(),
                 e.getOrDefault("CONCORD_INTERNAL_SECRET", env.equals("dev") ? DEV_INTERNAL_SECRET : ""),

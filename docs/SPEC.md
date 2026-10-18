@@ -581,7 +581,7 @@ Memory is updated only after the commit.
 
 1. The op enters the board actor's mailbox.
 2. Dedup (§4.3), then validate (§4.2). On failure, reply and stop.
-3. The actor's writer collects ops for up to 15ms (tunable), then runs one transaction for
+3. The actor's writer collects ops for up to 5ms (tunable; amendment 32, ADR-005), then runs one transaction for
    this board:
    1. Drop any `op_id` already in `board_ops` for this board. This catches duplicates the
       LRU missed; their stored ACKs are returned after commit.
@@ -1120,12 +1120,12 @@ Four are decided in this spec; the rest record choices made or measured during t
 | 000b | Java 21 server, TypeScript client, conformance suite between them; TypeScript everywhere as fallback | Decided; confirm before Phase 1 |
 | 001 | String fractional keys, ties broken by `(key, entity_id)`, interleaving accepted | Decided |
 | 002 | One atomic placement register, not separate list and position fields | Decided |
-| 003 | Delete wins over concurrent edits; restore via new tag; cards of a deleted list shown in Orphaned | Write during Phase 1 |
-| 004 | Actor per board instead of stateless merge-on-read | Write during Phase 2 |
-| 005 | ACK only after commit; group-commit window chosen from measurements | Write after the batching test |
-| 006 | Redis Pub/Sub, not Kafka, for fan-out: low latency, no durability needed because Postgres and versions cover gaps (contrast with Reliant) | Write during Phase 2 |
-| 007 | Fence in Postgres, not Redis; owners keep serving while Redis is down | Write during Phase 2 |
-| 008 | Snapshot every 500 ops or 60s, keep three | Write after the recovery test |
+| 003 | Delete wins over concurrent edits; restore via new tag; cards of a deleted list shown in Orphaned | Accepted (`docs/adr/`) |
+| 004 | Actor per board instead of stateless merge-on-read | Accepted (`docs/adr/`) |
+| 005 | ACK only after commit; group-commit window chosen from measurements | Accepted: 5ms (amendment 32) |
+| 006 | Redis Pub/Sub, not Kafka, for fan-out: low latency, no durability needed because Postgres and versions cover gaps (contrast with Reliant) | Accepted (`docs/adr/`) |
+| 007 | Fence in Postgres, not Redis; owners keep serving while Redis is down | Accepted (`docs/adr/`) |
+| 008 | Snapshot every 500 ops or 60s, keep three | Accepted after the recovery measurement |
 
 ### 11.1 Open before Phase 1 (resolved)
 
@@ -1176,3 +1176,4 @@ section text itself is updated in the same commit.
 | 29 | 2026-10-18 | §9.5 | Observability as built: Prometheus metrics on every service, `POST /api/telemetry` (bounded, rate-limited) for client-reported sync latency and client spans, OpenTelemetry traces keyed by `op_id` (off unless `CONCORD_OTLP_ENDPOINT` is set), the §9.5 alert rules and a Grafana dashboard under `--profile observability`; `/metrics*` not served through Caddy (it had been public on the trial host) (`PromTest`, `ApiTest.telemetryIsBoundedAndRateLimited`, `test/e2e/trace.test.ts`; guard checks `telemetry-size`, `telemetry-rate`, `telemetry-client-cap`, `trace-op-id`). |
 | 30 | 2026-10-18 | §8 row 14 | The per-gateway connection-rate limit is dropped; it was never built and the SPEC gave it no number. The reconnect-storm drill (500 clients on 50 boards, their gateway killed with SIGKILL and restarted, no limit) found no cascade: all rejoined in 16.2s on the laptop and 12.4s on CI, 0 ACKed ops lost, 50/50 boards converged, no other service restarted (`deploy/drills/results.txt`). Client jitter alone spread the load. Revisit if a gateway ever holds far more than 500 connections. |
 | 31 | 2026-10-18 | §7.3 | The client paces every op it sends to the gateway's per-connection limit (20 ops/s, burst 50) with a token bucket of the same shape, reset to full on each new connection, on real time; a `RETRY_LATER` resends the queue from the start through the same pacer. Found by the §10.1 offline measurement: the client sent its whole queue at once, the gateway refused all but the burst, and every refusal re-sent the whole queue, so a 1,885-op queue (8 hours offline, accelerated) took 487s to drain and a 5,760-op one (24 hours) still had 5,243 pending after 10 minutes. Nothing was lost (unit test "a long offline queue is sent at the gateway's pace", guard check `client-send-pacing`). |
+| 32 | 2026-10-18 | §6.1 step 3 | The group-commit window is 5ms, not 15ms (ADR-005). At 30 editors on one board it batches as much (2.55 ops per commit against 2.53) with an 11ms lower median sync latency (p50 24ms against 35ms); 0ms commits every op alone (1.0), and 30ms adds latency without batching more (`production/load-tests/README.md` §3). |
