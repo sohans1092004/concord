@@ -153,3 +153,11 @@ LIVE {"url":"https://throughout-laid-advance-saver.trycloudflare.com","seconds":
 deploy.sh exit 0
 LIVE {"url":"https://throughout-laid-advance-saver.trycloudflare.com","seconds":240,"submitted":1853,"acked":1854,"board_version":1854,"history":1854,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
 result: deploy and rollback both passed: 0 ACKed ops missing, 0 Unsent edits, converged
+
+## First trial deploy on the real host: amendment 27 (2026-10-18)
+command (VM): deploy/prod/deploy.sh 1000c46b67e8e40b1f30f17ff5386db0141aae05, from d9404706919e13f87c978a6742d442fed69145cb;
+done 04:49:18 UTC; every app container on 1000c46; public /healthz ok; rollback printed: deploy.sh d9404706...
+live check during it (laptop in India, 04:47:21-04:52:35 UTC): SMOKE_LIVE_SECONDS=300 npx vitest run test/smoke -t 'loses nothing'
+LIVE {"url":"https://concord-serve.duckdns.org","seconds":300,"submitted":2314,"acked":2315,"board_version":2315,"history":2315,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+after: the check's account deletion deleted its loaded board: session logs (15 min) ERROR count 0; "board deleted (announced): dropped" once
+result: passed, 0 ACKed ops missing, 0 Unsent edits; amendment 27 works on the live host
