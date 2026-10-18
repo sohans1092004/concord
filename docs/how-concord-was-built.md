@@ -167,7 +167,7 @@ All 15 failure scenarios in §8 are handled. The eight marked "drill" were induc
 | 11 | Access revoked while offline | Ops rejected into Unsent edits, never silently dropped | server and client tests |
 | 12 | Malformed or malicious op | Rejected before persist; logged with user and reason | e2e and server tests |
 | 13 | Snapshot corrupt | Hash mismatch → previous snapshot + longer tail | `SnapshotTest`; `RetentionTest` with two snapshots corrupted |
-| 14 | Reconnect storm | Client jitter (no rate limit needed: amendment 30) | 500 clients back in 16.2s; [007](../production/incident-reports/007-reconnect-storm.md) |
+| 14 | Reconnect storm | Client jitter (no rate limit needed: amendment 30) | 500 clients back in 3.5–16.2s; [007](../production/incident-reports/007-reconnect-storm.md) |
 | 15 | Rolling deploy | Gateway drains with `RECONNECT_ELSEWHERE`; owners hand over | 6 deploys under live editing, 0 lost; [008](../production/incident-reports/008-rolling-deploy.md) |
 
 ### Real bugs, and how each was found

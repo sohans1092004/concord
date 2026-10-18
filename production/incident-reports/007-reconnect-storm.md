@@ -50,10 +50,10 @@ So the condition could pass before every client was back (as it did locally: the
 
 - The corrected drill passed on the laptop and on CI (numbers above).
 - `deploy/drills/run-all.sh` runs it on every push.
-- The 3.5s figure is struck out in `deploy/drills/results.txt`, with the reason.
+- The first recorded 3.5s came from the flawed condition and is struck out in `deploy/drills/results.txt`; the later 3.5s comes from the corrected one.
 
 ## What I learned
 
-- A wait condition built from a total count is easy to satisfy by accident. "Every client did X after time T" is the precise statement.
+- A wait condition built from a total count is easy to satisfy by accident. But "every client did X after time T" was wrong too: it assumed the fault touched every client. The precise statement is about the clients the fault actually hit, and the drill should count them.
 - When a test times out but the system's own logs show success, the test is the suspect. Gateway2's 500 `client joined board` lines were the fastest route to the bug.
 - Dropping a promised feature on evidence is better than building it with an invented number. The measurement says when to come back to it.
