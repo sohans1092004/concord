@@ -192,4 +192,5 @@ why: the response carried Caddy's headers (HSTS, Alt-Svc) and the gateway's body
   adapts (caddy adapt, 2.8.4) to the 404 route before reverse_proxy. So Caddy reloaded an old file:
   compose mounted ./Caddyfile as a single file, which pins its inode; git checkout replaced the file,
   and the container kept seeing the old one.
+confirmed on the VM: docker compose exec caddy grep -c metrics /etc/caddy/Caddyfile -> 0 (the old file)
 fix: mount the directory deploy/prod/caddy (caddy/Caddyfile) instead of the file.

@@ -255,7 +255,15 @@ describe("drills", () => {
     const killedAt = Date.now();
     compose("kill", "-s", "SIGKILL", "gateway1");
     compose("start", "gateway1");
-    const back = await waitFor(() => all.every(({ x }) => x.c.status === "joined") && joins() >= joinsBefore + all.length, 300_000, "every client rejoined");
+    const rejoined = ({ x }: (typeof all)[number]) => x.c.status === "joined" && x.events.some((e) => e.event === "joined" && e.at > killedAt);
+    const back = await waitFor(() => all.every(rejoined), 300_000, "every client rejoined").catch((e: Error) => {
+      // Say why: how many are back, in which states the others are, and what they last did.
+      const stuck = all.filter((a) => !rejoined(a));
+      const states: Record<string, number> = {};
+      for (const { x } of stuck) states[x.c.status] = (states[x.c.status] ?? 0) + 1;
+      const last = stuck.slice(0, 3).map(({ x }) => x.events.slice(-4).map((ev) => `${ev.event}@+${ev.at - killedAt}ms`).join(", "));
+      throw new Error(`${e.message}: ${all.length - stuck.length}/${all.length} back, joins ${joinsBefore} -> ${joins()}, stuck by status ${JSON.stringify(states)}, last events: ${last.join(" | ")}`);
+    });
     editing = false;
     await Promise.all(editors);
 

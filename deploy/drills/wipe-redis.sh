@@ -3,5 +3,5 @@
 # clients converge to one state hash. Needs the stack: docker compose -f deploy/docker-compose.yml up -d
 set -euo pipefail
 cd "$(dirname "$0")/../../client-core"
-DRILL=wipe-redis npx vitest run test/drills --reporter=default 2>&1 | grep -E "DRILL |✓|×|FAIL|AssertionError|Error:|Tests "
+DRILL=wipe-redis npx vitest run test/drills --reporter=default 2>&1 | sed "s/$(printf '\033')\[[0-9;]*m//g" | grep -E "DRILL |✓|×|FAIL|AssertionError|Error:|Tests "
 exit "${PIPESTATUS[0]}"

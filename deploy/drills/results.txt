@@ -45,3 +45,14 @@ DRILL {"drill":"reconnect-storm","boards":50,"clients":500,"all_rejoined_after_m
       Tests  1 passed | 6 skipped (7)
 all drills passed
 exit 0 at 2026-10-18T09:04:41Z
+
+# reconnect-storm, corrected (same day, 09:4x UTC): the first run's condition (every client's status "joined"
+# and 500 more JOINED events in total) could pass while some clients had not yet noticed the drop (their status
+# stays "joined" until then; one that rejoins twice counts twice), and on CI it never passed although gateway2
+# logged all 500 joins within 9s. The drill now requires a JOINED after the kill from each client, and on a
+# timeout reports how many are back and what the others last did. The 3.5s above does not stand; this replaces it.
+# vitest warned "[vitest-worker]: Timeout calling onTaskUpdate": the 500 clients share one Node process, so the
+# time includes the harness's own CPU starvation and is an upper bound.
+command: deploy/drills/reconnect-storm.sh
+DRILL {"drill":"reconnect-storm","boards":50,"clients":500,"all_rejoined_after_ms":16202,"reconnect_failures":128,"acks":1447,"acked_missing_from_board_ops":0,"boards_converged":"50/50","restarts_before":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0},"restarts_after":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0}}
+      Tests  1 passed | 6 skipped (7)
