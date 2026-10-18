@@ -24,6 +24,9 @@ x-env: &env
   # The browser tests sign up dozens of users from one IP (and Vite's proxy makes every
   # browser one IP); the default is 30 (SPEC §9.4).
   CONCORD_SIGNIN_IP_BURST: "1000"
+  # Traces (SPEC 9.5): off unless set, e.g. CONCORD_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
+  # with --profile observability (Jaeger joins the stack).
+  CONCORD_OTLP_ENDPOINT: ${CONCORD_OTLP_ENDPOINT:-}
 
 x-session: &session
   <<: *server
@@ -107,3 +110,33 @@ services:
       <<: *env
       CONCORD_PORT: "8080"
     ports: ["8082:8080"]
+
+  # ---- Observability (SPEC 9.5), opt-in: --profile observability ----------------------------
+  # Prometheus http://localhost:9091 (alert rules: deploy/observability/alerts.yml), Grafana
+  # http://localhost:3003 (anonymous admin, local only; the "Concord overview" dashboard is
+  # provisioned), Jaeger http://localhost:16687 (traces, when CONCORD_OTLP_ENDPOINT is set above).
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: [observability]
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./observability:/etc/prometheus:ro
+    ports: ["9091:9090"]
+  jaeger:
+    image: jaegertracing/all-in-one:1.57.0
+    profiles: [observability]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16687:16686"]
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: [observability]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3003:3000"]
+    depends_on: [prometheus, jaeger]

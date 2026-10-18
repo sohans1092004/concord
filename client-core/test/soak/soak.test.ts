@@ -22,7 +22,7 @@ import { connect, type Socket as NetSocket } from "node:net";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { MemoryStorage, SyncClient } from "../../src/index.js";
+import { MemoryStorage, SyncClient, type Telemetry } from "../../src/index.js";
 import { client, docker, GATEWAYS, seed, sleep, ticket } from "../e2e/stack.js";
 
 const MINUTES = Number(process.env.SOAK_MINUTES ?? 0);
@@ -83,8 +83,15 @@ async function open(board: string, session: string, gateway: number, events: str
     events.push(`${new Date().toISOString().slice(11, 23)} ${event} ${JSON.stringify(rest)}`.slice(0, 200));
     if (events.length > 12) events.shift();
   };
-  if (!PROD) return (await client(board, session, gateway, { log })).c;
-  return SyncClient.open({ urls: WS, boardId: board, storage: new MemoryStorage(), ticket: () => ticketFor(session, 0), log });
+  // SOAK_TELEMETRY=1: report sync latency and spans as the web app does (SPEC 9.5), so the
+  // observability dashboard has live data. A refused report (one per 10s per user) is dropped.
+  const telemetry = process.env.SOAK_TELEMETRY ? (t: Telemetry) => {
+    const url = PROD ? `${BASE}/api/telemetry` : GATEWAYS[gateway]!.replace(/^ws/, "http").replace(/\/ws$/, "/api/telemetry");
+    void fetch(url, { method: "POST", headers: { ...(PROD ? { Origin: ORIGIN } : {}), Authorization: `Bearer ${session}`, "Content-Type": "application/json" }, body: JSON.stringify(t) }).catch(() => {});
+  } : undefined;
+  const extra = telemetry ? { log, telemetry } : { log };
+  if (!PROD) return (await client(board, session, gateway, extra)).c;
+  return SyncClient.open({ urls: WS, boardId: board, storage: new MemoryStorage(), ticket: () => ticketFor(session, 0), ...extra });
 }
 
 /**

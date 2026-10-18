@@ -1,6 +1,8 @@
 package dev.concord.session;
 
 import dev.concord.common.Msg;
+import dev.concord.common.Prom;
+import dev.concord.common.Tracing;
 import dev.concord.crdt.Board;
 import dev.concord.crdt.Hlc;
 import dev.concord.crdt.Op;
@@ -108,7 +110,7 @@ public final class BoardActor {
     };
 
     /** An admitted op waiting for the group commit, and everyone waiting for its ACK. */
-    private record Waiting(Store.Pending pending, List<Reply> replies) {}
+    private record Waiting(Store.Pending pending, List<Reply> replies, long admittedNanos) {}
 
     private final LinkedHashMap<String, Waiting> batch = new LinkedHashMap<>();
     private final Set<String> batchLists = new HashSet<>(), batchCards = new HashSet<>();
@@ -213,6 +215,7 @@ public final class BoardActor {
             d.metrics().inc("claims");
             log.atInfo().addKeyValue("board_id", id).addKeyValue("fence", fence).addKeyValue("version", version)
                     .addKeyValue("tail", l.tail()).addKeyValue("claim_ms", now - started).log("claimed board");
+            d.metrics().prom.observe("claim_ms", Prom.MS, now - started); // recovery time, 9.5
         } catch (SQLException | RuntimeException e) {
             log.atWarn().addKeyValue("board_id", id).log("load after claim failed: {}", e.toString());
             safeRelease();
@@ -247,7 +250,10 @@ public final class BoardActor {
         switch (item) {
             case Submit s -> admit(s);
             case Join j -> catchUp("JOINED", j.userId(), j.since(), j.reply());
-            case SyncRequest s -> catchUp("SYNC", s.userId(), s.since(), s.reply());
+            case SyncRequest s -> {
+                d.metrics().inc("sync_requests"); // a client saw a version gap (6.4)
+                catchUp("SYNC", s.userId(), s.since(), s.reply());
+            }
             case Poll p -> poll(p);
             case Ensure e -> e.reply().send(Msg.obj("type", "OK", "version", version));
             case Drop dr -> {
@@ -289,7 +295,7 @@ public final class BoardActor {
         if (batch.isEmpty()) batchDeadline = d.clock().getAsLong() + d.batchMs();
         List<Reply> replies = new ArrayList<>();
         replies.add(s.reply());
-        batch.put(opId, new Waiting(new Store.Pending(op, json, s.userId()), replies));
+        batch.put(opId, new Waiting(new Store.Pending(op, json, s.userId()), replies, Tracing.nowNanos()));
         if (op instanceof Op.AddList a) batchLists.add(a.listId());
         if (op instanceof Op.AddCard c) batchCards.add(c.cardId());
     }
@@ -384,6 +390,7 @@ public final class BoardActor {
         batchLists.clear();
         batchCards.clear();
         long started = d.clock().getAsLong();
+        long commitStart = Tracing.nowNanos();
         Store.Committed c;
         try {
             c = d.store().commit(id, fence, ops, started + COMMIT_TIMEOUT_MS);
@@ -412,6 +419,14 @@ public final class BoardActor {
         }
         d.metrics().inc("commits");
         d.metrics().add("committed_ops", c.versions().size());
+        d.metrics().prom.observe("commit_ms", Prom.MS, d.clock().getAsLong() - started);
+        d.metrics().prom.observe("batch_size", Prom.COUNT, ops.size());
+        long commitEnd = Tracing.nowNanos();
+        for (Waiting w : waiting) { // SPEC 9.5 traces: time in the batch, then the commit
+            String o = w.pending().op().opId();
+            Tracing.span(o, "owner.admit", w.admittedNanos(), commitStart, "board_id", id);
+            Tracing.span(o, "owner.commit", commitStart, commitEnd, "board_id", id, "batch_size", Integer.toString(ops.size()));
+        }
         int next = 0;
         for (Waiting w : waiting) {
             String opId = w.pending().op().opId();
@@ -470,7 +485,7 @@ public final class BoardActor {
                 json.put("placement", Op.placement(container.isEmpty() ? null : container, fresh.get(i)));
                 Op op = Op.parse(json);
                 if (batch.isEmpty()) batchDeadline = d.clock().getAsLong();
-                batch.put(op.opId(), new Waiting(new Store.Pending(op, json, SYSTEM_USER), new ArrayList<>()));
+                batch.put(op.opId(), new Waiting(new Store.Pending(op, json, SYSTEM_USER), new ArrayList<>(), Tracing.nowNanos()));
                 n++;
             }
             d.metrics().inc("rebalances");
@@ -491,7 +506,10 @@ public final class BoardActor {
         version = v;
         lru.put(op.opId(), v);
         opsSinceSnapshot++;
+        d.metrics().prom.inc("board_ops", "board_id", id);
+        long published = Tracing.nowNanos();
         d.publisher().publish(id, Msg.encode(Msg.broadcast(json, v, userId)));
+        Tracing.span(op.opId(), "owner.broadcast", published, Tracing.nowNanos(), "board_id", id, "version", Long.toString(v));
     }
 
     /**
@@ -611,6 +629,8 @@ public final class BoardActor {
             String canonical = board.canonical();
             d.store().writeSnapshot(id, version, canonical);
             d.metrics().inc("snapshots");
+            d.metrics().prom.observe("snapshot_ms", Prom.MS, d.clock().getAsLong() - started);
+            d.metrics().prom.observe("snapshot_bytes", Prom.BYTES, canonical.length());
             log.atInfo().addKeyValue("board_id", id).addKeyValue("version", version).addKeyValue("bytes", canonical.length())
                     .addKeyValue("ms", d.clock().getAsLong() - started).log("snapshot written");
         } catch (Store.BoardDeleted e) {
@@ -683,6 +703,7 @@ public final class BoardActor {
         synchronized (closeLock) {
             state = State.CLOSED;
         }
+        d.metrics().prom.remove("board_ops", "board_id", id);
         for (Waiting w : batch.values()) for (Reply r : w.replies()) r.send(Msg.error(code, w.pending().op().opId(), why));
         batch.clear();
         for (Item item; (item = mailbox.poll()) != null; ) {

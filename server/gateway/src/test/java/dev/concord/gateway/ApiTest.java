@@ -323,4 +323,35 @@ class ApiTest {
         assertTrue(stored.contains("ticket=REDACTED"), stored);
         assertTrue(stored.contains("\"pending\": 3"), stored);
     }
+
+    /** SPEC 9.5 telemetry: signed in only, range-checked, at most 100 items, one report per 10s (burst 2). */
+    @Test
+    void telemetryIsBoundedAndRateLimited() throws Exception {
+        assertEquals(401, new Rest(g.port()).post("/api/telemetry", Msg.obj("sync_ms", List.of(5L))).status());
+        Rest u = new Rest(g.port());
+        u.signUp(Rest.email(), "Reporter");
+        long before = histogramCount(g.prom.render());
+        long now = System.currentTimeMillis();
+        Rest.Reply ok = u.post("/api/telemetry", Msg.obj(
+                "sync_ms", List.of(-1L, 120L, 70_000L, "x", 250L),
+                "spans", List.of(
+                        Msg.obj("op_id", "not-a-uuid", "name", "client.send", "start_ms", now, "end_ms", now + 1),
+                        Msg.obj("op_id", UUID.randomUUID().toString(), "name", "owner.commit", "start_ms", now, "end_ms", now + 1),
+                        Msg.obj("op_id", UUID.randomUUID().toString(), "name", "peer.render", "start_ms", now, "end_ms", now + 120_000),
+                        Msg.obj("op_id", UUID.randomUUID().toString(), "name", "peer.render", "start_ms", now, "end_ms", now + 3))));
+        assertEquals(200, ok.status(), () -> String.valueOf(ok.body()));
+        assertEquals(3L, ok.body().get("accepted"), "two samples in range and one valid span; the rest dropped");
+        assertEquals(before + 2, histogramCount(g.prom.render()));
+        Rest.Reply tooBig = u.post("/api/telemetry", Msg.obj("sync_ms", java.util.Collections.nCopies(Api.MAX_TELEMETRY + 1, 5L)));
+        assertEquals(413, tooBig.status(), () -> String.valueOf(tooBig.body()));
+        Rest.Reply third = u.post("/api/telemetry", Msg.obj("sync_ms", List.of(5L)));
+        assertEquals(429, third.status(), "the third report within 10s");
+        assertEquals(before + 2, histogramCount(g.prom.render()));
+    }
+
+    private static long histogramCount(String prometheus) {
+        for (String line : prometheus.split("\n"))
+            if (line.startsWith("concord_gateway_sync_latency_ms_count ")) return Long.parseLong(line.substring(line.indexOf(' ') + 1));
+        return 0;
+    }
 }

@@ -1,6 +1,7 @@
 // Shared settings for every module. Versions live here so there is one place to read them.
 extra["versions"] = mapOf(
     "javalin" to "6.7.0",
+    "otel" to "1.42.1",
     "hikari" to "6.3.0",
     "postgres" to "42.7.7",
     "lettuce" to "6.7.1.RELEASE",

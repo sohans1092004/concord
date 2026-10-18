@@ -19,6 +19,9 @@
 	# The gateway serves the web app, the REST API and /ws. The Content-Security-Policy comes
 	# from the gateway. X-Forwarded-For is set to exactly the connecting client's address, which
 	# the gateway believes only because the request comes from Caddy (amendment 23).
+	# Metrics are for the inside only (summary.sh reads them with docker compose exec).
+	@internal path /metrics /metrics/*
+	respond @internal 404
 	reverse_proxy gateway:8080 {
 		header_up X-Forwarded-For {remote_host}
 	}

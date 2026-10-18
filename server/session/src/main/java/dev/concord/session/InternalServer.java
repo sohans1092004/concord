@@ -38,6 +38,7 @@ public final class InternalServer implements AutoCloseable {
             });
         });
         app.get("/metrics", ctx -> ctx.contentType("application/json").result(Msg.encode(metrics.snapshot())));
+        app.get("/metrics/prometheus", ctx -> ctx.contentType("text/plain; version=0.0.4").result(metrics.prometheus()));
         app.get("/health", ctx -> ctx.result("ok"));
         app.get("/healthz", ctx -> ctx.result("ok"));
         // Only gateways holding the shared secret may open the internal socket (amendment 8).

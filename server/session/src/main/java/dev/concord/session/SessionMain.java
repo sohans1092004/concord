@@ -5,6 +5,7 @@ import dev.concord.common.Config;
 import dev.concord.common.Db;
 import dev.concord.common.Redis;
 import dev.concord.common.RedisKeys;
+import dev.concord.common.Tracing;
 import dev.concord.common.Rendezvous;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
@@ -51,6 +52,8 @@ public final class SessionMain implements AutoCloseable {
             }
         });
         membershipSub.sync().subscribe(RedisKeys.MEMBERSHIP_CHANNEL, RedisKeys.BOARD_DELETED_CHANNEL);
+        metrics.prom.gauge("boards_loaded", boards::size);
+        Tracing.init("concord-session", System.getenv("CONCORD_OTLP_ENDPOINT")); // SPEC 9.5; off unless set
         this.server = new InternalServer(boards, metrics, config.port(), config.internalSecret());
         this.registry = new Registry(redis.conn.sync(), new Rendezvous.Instance(config.instanceId(), config.advertise()), System::currentTimeMillis);
         log.atInfo().addKeyValue("instance", config.instanceId()).addKeyValue("address", config.advertise()).log("session instance up");

@@ -2,7 +2,7 @@
 // "moved by" (§3.5), the trash view, presence (§7.5), labels (§4.2) and the member map.
 import { Board, hlc as H, type Op } from "@concord/crdt";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryStorage, MOVED_BY_MS, normalizeLabels, SILENCE_MS, SyncClient, type Socket } from "../../src/index.js";
+import { MemoryStorage, MOVED_BY_MS, normalizeLabels, SILENCE_MS, SyncClient, TELEMETRY_MAX, type Socket, type Telemetry } from "../../src/index.js";
 
 const BOARD = "b0a4d000-0000-4000-8000-000000000002";
 const T0 = 1_760_000_000_000;
@@ -33,7 +33,7 @@ class FakeSocket implements Socket {
   }
 }
 
-async function joined(extra: Record<string, unknown> = {}) {
+async function joined(extra: Record<string, unknown> = {}, telemetry?: (t: Telemetry) => void) {
   let t = T0;
   const sockets: FakeSocket[] = [];
   const client = await SyncClient.open({
@@ -43,7 +43,7 @@ async function joined(extra: Record<string, unknown> = {}) {
       sockets.push(s);
       return s;
     },
-    now: () => t, random: () => 0,
+    now: () => t, random: () => 0, ...(telemetry ? { telemetry } : {}),
   });
   await new Promise((r) => setTimeout(r, 5));
   const ws = sockets[0]!;
@@ -372,5 +372,23 @@ describe("§7.2 order: durable append, then view, then send (amendment 21)", () 
     const next = b.submit({ type: "ADD_LIST", list_id: crypto.randomUUID(), placement: { position_key: "a2" }, title: "z" });
     for (const o of ops) expect(H.compare(next.hlc, o.hlc)).toBeGreaterThan(0);
     b.close();
+  });
+});
+
+describe("§9.5 telemetry", () => {
+  it("reports other clients' edits in reports the gateway accepts, never its own", async () => {
+    const reports: Telemetry[] = [];
+    const x = await joined({}, (t) => reports.push(t));
+    x.client.addList("mine");
+    x.ackAll();
+    for (let i = 0; i < 250; i++) x.remote({ type: "ADD_LIST", list_id: crypto.randomUUID(), placement: { position_key: `a${i}` }, title: `${i}` }, ALICE, 0);
+    x.client.flushTelemetry();
+    const items = (t: Telemetry) => t.sync_ms.length + t.spans.length;
+    expect(reports.every((t) => items(t) <= TELEMETRY_MAX)).toBe(true);
+    expect(reports.flatMap((t) => t.sync_ms)).toHaveLength(250);
+    const spans = reports.flatMap((t) => t.spans);
+    expect(spans.filter((s) => s.name === "peer.render")).toHaveLength(250);
+    expect(spans.filter((s) => s.name === "client.send")).toHaveLength(1);
+    x.client.close();
   });
 });

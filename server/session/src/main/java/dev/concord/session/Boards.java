@@ -69,6 +69,11 @@ public final class Boards implements AutoCloseable {
                 && m.get("op_id") instanceof String x ? x : null, detail));
     }
 
+    /** Boards this instance has loaded. */
+    public long size() {
+        return actors.size();
+    }
+
     public BoardActor actor(String board) {
         return actors.get(board);
     }

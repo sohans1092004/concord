@@ -4,6 +4,8 @@ import com.zaxxer.hikari.HikariDataSource;
 import dev.concord.common.Config;
 import dev.concord.common.Db;
 import dev.concord.common.Msg;
+import dev.concord.common.Tracing;
+import dev.concord.common.Prom;
 import dev.concord.common.Outbox;
 import dev.concord.common.Redis;
 import io.javalin.Javalin;
@@ -36,6 +38,7 @@ public final class GatewayMain implements AutoCloseable {
     private final Javalin app;
     private final Map<String, ClientConn> conns = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong slowConsumerCloses = new java.util.concurrent.atomic.AtomicLong();
+    final Prom prom = new Prom("concord_gateway");
     /** Largest backlog any one client connection reached, in bytes. */
     final java.util.concurrent.atomic.AtomicLong outboxPeak = new java.util.concurrent.atomic.AtomicLong();
 
@@ -61,7 +64,11 @@ public final class GatewayMain implements AutoCloseable {
                 cfg.spaRoot.addFile("/", config.webDir() + "/index.html", Location.EXTERNAL);
             }
         });
-        Api api = new Api(app, db, redis.conn.sync(), config, System::currentTimeMillis);
+        Tracing.init("concord-gateway", System.getenv("CONCORD_OTLP_ENDPOINT")); // SPEC 9.5; off unless set
+        prom.gauge("connections", conns::size);
+        prom.gauge("clients_on_boards", () -> fanout.clientCount());
+        prom.gauge("outbox_peak_bytes", outboxPeak::get);
+        Api api = new Api(app, db, redis.conn.sync(), config, System::currentTimeMillis, prom);
         cleaner.scheduleWithFixedDelay(api::cleanup, 60, 60, java.util.concurrent.TimeUnit.SECONDS);
         // Op retention (SPEC §5.1, amendment 28): daily, the first run 10 minutes after start.
         cleaner.scheduleWithFixedDelay(() -> Retention.daily(db), 10, 24 * 60, java.util.concurrent.TimeUnit.MINUTES);
@@ -92,6 +99,8 @@ public final class GatewayMain implements AutoCloseable {
                     + "base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
             app.after(ctx -> ctx.header("Content-Security-Policy", csp));
         }
+        // Prometheus (SPEC 9.5), scraped from inside the Docker network; Caddy refuses /metrics*.
+        app.get("/metrics/prometheus", ctx -> ctx.contentType("text/plain; version=0.0.4").result(prom.render()));
         app.get("/metrics", ctx -> ctx.contentType("application/json")
                 .result(Msg.encode(Msg.obj("connections", (long) conns.size(), "clients_on_boards", (long) fanout.clientCount(),
                         "slow_consumer_closes", slowConsumerCloses.get(), "outbox_peak_bytes", outboxPeak.get(),
@@ -120,9 +129,11 @@ public final class GatewayMain implements AutoCloseable {
                 }
                 Outbox outbox = new Outbox(ctx.session, config.clientOutboxBytes(), Msg.encode(Msg.obj("type", "RECONNECT_ELSEWHERE")), () -> {
                     slowConsumerCloses.incrementAndGet();
+                    prom.inc("slow_consumer_closes");
                     log.atWarn().addKeyValue("user_id", user).log("slow consumer: backlog over the limit, disconnecting");
                 }, outboxPeak);
                 conns.put(ctx.sessionId(), new ClientConn(user, ctx, router, fanout, System::currentTimeMillis, outbox, presence));
+                prom.inc("connections_opened"); // a reconnect storm shows here
                 log.atInfo().addKeyValue("user_id", user).log("client connected");
             });
             ws.onMessage(ctx -> {

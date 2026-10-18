@@ -37,6 +37,11 @@ export function useBoard(boardId: string): { board: OpenBoard | null; error: str
           clientLog.push({ at: Date.now(), event, data });
           if (clientLog.length > 200) clientLog.shift();
         },
+        // SPEC 9.5: sync latency and this client's trace spans, best effort (a refused or failed
+        // report is dropped; nothing retries it).
+        telemetry: (report) => {
+          void fetch("/api/telemetry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(report) }).catch(() => {});
+        },
       });
       opened = { client, storage };
       if (closed) {

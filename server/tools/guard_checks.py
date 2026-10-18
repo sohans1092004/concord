@@ -114,6 +114,22 @@ CHECKS = {
         "keeping a board loaded while a gateway is subscribed to its channel (amendment 26)",
         [(ACTOR, "        if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say\n", "")],
         "dev.concord.session.IdleUnloadTest.anIdleBoardIsUnloadedAndARejoinConverges", True),
+    "telemetry-size": (
+        "capping a telemetry report at 100 items (SPEC 9.5)",
+        [(API, "        if (sync.size() + spans.size() > MAX_TELEMETRY) {\n", "        if (false) {\n")],
+        "dev.concord.gateway.ApiTest.telemetryIsBoundedAndRateLimited", True),
+    "telemetry-rate": (
+        "rate-limiting telemetry reports to one per 10s per user (SPEC 9.5)",
+        [(API, "        if (!allowed(\"telemetry:\" + u.id(), 0.1, 2)) {\n", "        if (false) {\n")],
+        "dev.concord.gateway.ApiTest.telemetryIsBoundedAndRateLimited", True),
+    "telemetry-client-cap": (
+        "sending the client's telemetry report before two new items would push it over 100 (SPEC 9.5)",
+        [(CLIENT, "+ (span ? 1 : 0) > TELEMETRY_MAX) this.flushTelemetry();", "+ (span ? 1 : 0) > TELEMETRY_MAX) void 0;")],
+        "vitest:test/unit/features.test.ts", True),
+    "trace-op-id": (
+        "keying the owner's commit span by the op's op_id, so it joins the edit's trace (SPEC 9.5)",
+        [(ACTOR, "            Tracing.span(o, \"owner.commit\", commitStart,", "            Tracing.span(java.util.UUID.randomUUID().toString(), \"owner.commit\", commitStart,")],
+        "trace:test/e2e/trace.test.ts", True),
     "retention-below-snapshot": (
         "op retention never deleting an op above a kept snapshot (SPEC 5.1, amendment 28)",
         [(RETENTION, " WHERE o.version <= k.oldest\"", " WHERE true\"")],
@@ -202,6 +218,8 @@ def run_check(test):
     kind, _, rest = test.partition(":")
     if kind == "drill":
         return drill(rest)
+    if kind == "trace":
+        return trace(rest)
     if kind == "vitest":
         return node(REPO / "client-core", ["vitest", "run", rest])
     if kind == "pw":
@@ -216,6 +234,25 @@ def node(cwd, args):
     r = subprocess.run([npx, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     out = re.sub(r"\[[0-9;]*m", "", r.stdout + r.stderr)
     why = next((l.strip() for l in out.splitlines() if "AssertionError" in l or "Error:" in l), "")
+    return r.returncode == 0, why[:200]
+
+
+def trace(test_file):
+    """Rebuilds and restarts the Session instances with tracing on (Jaeger must be up: --profile
+    observability), then runs the end-to-end trace test."""
+    env = {**os.environ, "CONCORD_OTLP_ENDPOINT": "http://jaeger:4318/v1/traces"}
+    subprocess.run(COMPOSE + ["--profile", "observability", "up", "-d", "--build", "session1", "session2", "session3"],
+                   check=True, capture_output=True, env=env)
+    for port in (7001, 7002, 7003):
+        for _ in range(120):
+            if subprocess.run(["curl", "-fs", f"localhost:{port}/health"], capture_output=True).returncode == 0:
+                break
+            subprocess.run(["python", "-c", "import time; time.sleep(1)"])
+    npx = shutil.which("npx") or "npx"
+    r = subprocess.run([npx, "vitest", "run", test_file], cwd=REPO / "client-core", env={**os.environ, "TRACE_TEST": "1"},
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout + r.stderr)
+    why = next((l.strip() for l in out.splitlines() if "AssertionError" in l), "")
     return r.returncode == 0, why[:200]
 
 

@@ -2,6 +2,7 @@ package dev.concord.gateway;
 
 import dev.concord.common.Msg;
 import dev.concord.common.RedisKeys;
+import dev.concord.common.Tracing;
 import dev.concord.crdt.Json;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
@@ -88,13 +89,20 @@ final class Fanout implements AutoCloseable {
     private void deliver(String board, String message) {
         Map<Object, Consumer<String>> m = clients.get(board);
         if (m == null) return;
+        long received = Tracing.nowNanos();
+        String opId = null;
         try {
             Map<?, ?> msg = (Map<?, ?>) Json.parse(message);
-            if ("OP_BROADCAST".equals(msg.get("type")) && msg.get("version") instanceof Long v) saw(board, v);
+            if ("OP_BROADCAST".equals(msg.get("type")) && msg.get("version") instanceof Long v) {
+                saw(board, v);
+                if (msg.get("op") instanceof Map<?, ?> op && op.get("op_id") instanceof String id) opId = id;
+            }
         } catch (RuntimeException e) {
             return;
         }
         for (Consumer<String> send : m.values()) send.accept(message);
+        // SPEC 9.5: from Redis to every client of this gateway on the board (queued, not yet read).
+        if (opId != null) Tracing.span(opId, "gateway.deliver", received, Tracing.nowNanos(), "board_id", board, "clients", Integer.toString(m.size()));
     }
 
     private void tick() {

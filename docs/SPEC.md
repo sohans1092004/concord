@@ -998,6 +998,35 @@ independent of both cores.
 | Traces | OpenTelemetry: client send → gateway → owner → commit → broadcast → peer render |
 | Alerts | Sync p95 > 200ms for 5 min; commit failures; any fence rejection; claim churn above normal; version-gap rate above normal; reconnect storm |
 
+As built (amendment 29):
+
+- **Metrics:** Prometheus text on `/metrics/prometheus` of every gateway and Session instance
+  (`concord_gateway_*`, `concord_session_*`). Histograms: commit latency, batch size,
+  snapshot size and duration, claim (recovery) time, and client-reported sync latency.
+  `board_ops_total{board_id}` gives ops/s per board, and `rejected_total{code}` rejections by
+  code. Version gaps are counted as clients' `SYNC_REQUEST`s.
+- **Client reports:** `POST /api/telemetry` takes what only a client can measure: sync latency
+  samples and its two trace spans.
+  - Bounded: signed in, one report per 10s per user (burst 2), at most 100 items, values
+    range-checked, the rest dropped.
+  - Sync latency is another client's op, from its HLC time until applied here. Both clocks are
+    corrected only by the offset taken at JOIN (§3.1), so the error is the difference of the
+    two clients' one-way delays.
+- **Traces:** OpenTelemetry, one trace per edit, with trace ID = the op's `op_id`, so nothing
+  new travels on the wire.
+  - Spans: `client.send` (the root), `gateway.forward`, `owner.admit`, `owner.commit`,
+    `owner.broadcast`, `gateway.deliver`, `peer.render`.
+  - Exported over OTLP only when `CONCORD_OTLP_ENDPOINT` is set (the local observability stack;
+    never the trial VM).
+  - Client spans carry the same clock error as the latency samples.
+- **Where it runs:** `docker compose --profile observability` (`deploy/docker-compose.yml`) runs
+  Prometheus with the alert rules (`deploy/observability/alerts.yml`), Grafana with a
+  provisioned dashboard, and Jaeger, locally only.
+  - On the trial VM, Caddy answers 404 for `/metrics*`, and `summary.sh` reads the numbers from
+    inside the Docker network.
+- **Logs:** JSON lines carry `board_id`, `op_id` and `user_id` where known. Joins and
+  disconnects are logged with the board and the user.
+
 ### 9.6 Trial deployment (Phase 4a)
 
 One VM (`deploy/prod/compose.yaml`; operations in `docs/runbook.md`):
@@ -1141,3 +1170,4 @@ section text itself is updated in the same commit.
 | 26 | 2026-10-17 | §2.5 (new) | An owner unloads a board after 10 minutes with no request and no gateway subscribed to its channel, through the graceful handover path (snapshot, release the lease, close); never while reconciling, with ops in the mailbox or batch, or when Redis cannot count subscribers. Found by the Phase 4a soak: without it, a Session instance's heap grew with the history of every board it had loaded (`IdleUnloadTest`; guard checks `idle-unload-not-reconciling`, `idle-unload-subscribers`). |
 | 27 | 2026-10-18 | §2.6 (new), §2.1 | A board deleted while its owner has it loaded is dropped: announced on `board-deleted`, or found at the next commit (no fence alert), reconcile (no endless retry) or snapshot; no snapshot, lease released, queued requests get UNAUTHORIZED "board deleted". Found on the live host: the smoke test's account deletion left a loaded board whose snapshot failed on the foreign key (`BoardDeletedTest`; guard checks `board-deleted-commit`, `board-deleted-reconcile`, `board-deleted-announced`). |
 | 28 | 2026-10-18 | §5.1, §9.6 | Op retention bounded by the oldest of the three kept snapshots, not the latest: with the latest, a corrupt newest snapshot would fall back (§8 row 13) to an older one whose tail had been deleted. Runs daily in the gateway, in batches. The backup manifest's independent replay starts from the oldest kept snapshot that passes its checksum (from version 0 when nothing was pruned), instead of from version 1 (`RetentionTest`; guard checks `retention-below-snapshot`, `retention-oldest-snapshot`). |
+| 29 | 2026-10-18 | §9.5 | Observability as built: Prometheus metrics on every service, `POST /api/telemetry` (bounded, rate-limited) for client-reported sync latency and client spans, OpenTelemetry traces keyed by `op_id` (off unless `CONCORD_OTLP_ENDPOINT` is set), the §9.5 alert rules and a Grafana dashboard under `--profile observability`; `/metrics*` not served through Caddy (it had been public on the trial host) (`PromTest`, `ApiTest.telemetryIsBoundedAndRateLimited`, `test/e2e/trace.test.ts`; guard checks `telemetry-size`, `telemetry-rate`, `telemetry-client-cap`, `trace-op-id`). |

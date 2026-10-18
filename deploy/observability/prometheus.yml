@@ -1,0 +1,20 @@
+# Scrapes every Concord service of the dev stack (deploy/docker-compose.yml) on the compose
+# network. Start with:
+#   CONCORD_OTLP_ENDPOINT=http://jaeger:4318/v1/traces docker compose -f deploy/docker-compose.yml --profile observability up -d
+# Prometheus http://localhost:9091, Grafana http://localhost:3003, Jaeger http://localhost:16687.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: concord-gateway
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['gateway1:8080', 'gateway2:8080']
+  - job_name: concord-session
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['session1:7000', 'session2:7000', 'session3:7000']

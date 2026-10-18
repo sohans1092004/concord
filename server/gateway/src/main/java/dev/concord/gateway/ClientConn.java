@@ -1,6 +1,7 @@
 package dev.concord.gateway;
 
 import dev.concord.common.Msg;
+import dev.concord.common.Tracing;
 import dev.concord.crdt.Hlc;
 import dev.concord.crdt.Json;
 import io.javalin.websocket.WsContext;
@@ -163,6 +164,8 @@ final class ClientConn {
             board = null;
         }
         send(r);
+        log.atInfo().addKeyValue("board_id", b).addKeyValue("user_id", userId).addKeyValue("reply", String.valueOf(r.get("type")))
+                .addKeyValue("code", r.get("code")).log("client joined board");
         if ("JOINED".equals(r.get("type"))) {
             joined = true;
             for (Map<String, Object> p : presence.snapshot(b)) send(p); // who is here already
@@ -181,7 +184,10 @@ final class ClientConn {
             send(Msg.error(Msg.INVALID_OP, opId, "op.board_id is not the joined board"));
             return;
         }
+        long forwarded = Tracing.nowNanos();
         Map<String, Object> r = await(router.forward(b, Msg.obj("k", "OP", "board_id", b, "user_id", userId, "op", op)));
+        // SPEC 9.5: from taking the op off this connection's queue to the owner's answer.
+        Tracing.span(opId, "gateway.forward", forwarded, Tracing.nowNanos(), "board_id", b, "user_id", userId, "reply", String.valueOf(r.get("type")));
         if ("ERROR".equals(r.get("type")) && r.get("op_id") == null) r.put("op_id", opId);
         send(r);
     }
@@ -202,6 +208,7 @@ final class ClientConn {
         worker.interrupt();
         presence.leave(connectionId);
         String b = board;
+        log.atInfo().addKeyValue("board_id", b).addKeyValue("user_id", userId).log("client disconnected");
         if (b != null) fanout.leave(b, this);
     }
 

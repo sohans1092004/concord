@@ -1,0 +1,57 @@
+# The alerts of SPEC §9.5. Thresholds marked "starting point" are guesses to be tuned against
+# real traffic, not measured limits.
+groups:
+  - name: concord
+    rules:
+      - alert: ConcordServiceDown
+        expr: up{job=~"concord-.*"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} ({{ $labels.job }}) is not answering metrics scrapes"
+
+      # Sync p95 > 200ms for 5 min (§9.5), from the latencies clients report (/api/telemetry).
+      - alert: ConcordSyncLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(concord_gateway_sync_latency_ms_bucket[5m])) by (le)) > 200
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sync latency p95 is {{ $value | humanize }} ms (target 200 ms)"
+
+      # Commit failures: the owner could not tell whether a batch committed and is reconciling.
+      - alert: ConcordCommitFailures
+        expr: sum(increase(concord_session_commit_failures_total[5m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} commit failures in 5 minutes (Postgres slow or unreachable)"
+
+      # Any fence rejection: a stale owner tried to commit and Postgres refused it (§6.3).
+      - alert: ConcordFenceRejection
+        expr: sum(increase(concord_session_fence_rejections_total[15m])) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "A stale owner was fenced out: two instances believed they owned a board"
+
+      # Claim churn above normal: boards changing owner repeatedly (starting point: 30/min).
+      - alert: ConcordClaimChurn
+        expr: sum(rate(concord_session_claims_total[10m])) * 60 > 30
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} board claims per minute"
+
+      # Version gaps above normal: clients asking to resync after a missed broadcast (starting point: 1/s).
+      - alert: ConcordVersionGaps
+        expr: sum(rate(concord_session_sync_requests_total[5m])) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} version gaps per second (Pub/Sub dropping messages?)"
+
+      # Reconnect storm: connections opening far faster than usual (starting point: 20/s).
+      - alert: ConcordReconnectStorm
+        expr: sum(rate(concord_gateway_connections_opened_total[1m])) > 20
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} WebSocket connections opened per second"

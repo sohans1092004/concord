@@ -107,7 +107,30 @@ export interface ClientOptions {
   readonly now?: () => number;
   readonly random?: () => number;
   readonly log?: (event: string, data: Record<string, unknown>) => void;
+  /**
+   * SPEC 9.5: what only a client can measure, handed over every 10s (at most 100 items) for the
+   * app to POST to /api/telemetry. Sync latency: another client's op, from its HLC time until it
+   * is applied here (both clocks corrected by the server's, so the error is the difference of
+   * the two clients' one-way delays). Spans of the op's trace: client.send (made until sent) and
+   * peer.render (received until applied). Off when not given.
+   */
+  readonly telemetry?: (report: Telemetry) => void;
 }
+
+export interface TelemetrySpan {
+  readonly op_id: string;
+  readonly name: "client.send" | "peer.render";
+  readonly start_ms: number;
+  readonly end_ms: number;
+}
+
+export interface Telemetry {
+  readonly sync_ms: number[];
+  readonly spans: TelemetrySpan[];
+}
+
+/** At most this many items per telemetry report (the gateway refuses more). */
+export const TELEMETRY_MAX = 100;
 
 /** A connection that has not reached JOINED by then is abandoned (a hung handshake or owner). */
 export const JOIN_TIMEOUT_MS = 10_000;
@@ -131,6 +154,9 @@ export class SyncClient {
   private pending: Op[] = [];
   private unsent: Unsent[] = [];
   private replicaId = O.newOpId();
+  private telemetryBuf: { sync_ms: number[]; spans: TelemetrySpan[] } = { sync_ms: [], spans: [] };
+  private readonly madeAt = new Map<string, number>();
+  private telemetryTimer: ReturnType<typeof setTimeout> | null = null;
   private clock: Hlc;
   private offsetMs = 0;
   private role: string | null = null;
@@ -325,6 +351,7 @@ export class SyncClient {
   submit(body: Body): Op {
     this.clock = H.tick(this.clock, this.physicalNow());
     const op = { op_id: O.newOpId(), board_id: this.opts.boardId, hlc: H.encode(this.clock), replica_id: this.replicaId, ...body } as Op;
+    if (this.opts.telemetry && this.madeAt.size < 1_000) this.madeAt.set(op.op_id, this.physicalNow());
     const check = O.checkShape(op);
     if (!check.ok) throw new Error(`client-core: refusing to submit an invalid op: ${check.reason}`);
     // §7.2: 2. append it durably; 3. then update the view; 4. then send. In order, one at a time.
@@ -429,6 +456,7 @@ export class SyncClient {
 
   /** Stops for good: no reconnects, no timers. Pending ops stay saved for the next open. */
   close(): void {
+    this.flushTelemetry();
     if (this.queueDirty || this.confirmedDirty) this.saveNow();
     (globalThis as { removeEventListener?: (t: string, f: () => void) => void }).removeEventListener?.("pagehide", this.onPageHide);
     this.status_ = "closed";
@@ -541,7 +569,41 @@ export class SyncClient {
   }
 
   private sendOp(op: Op): void {
-    if (this.status_ === "joined") this.send({ type: "OP", op });
+    if (this.status_ !== "joined") return;
+    this.send({ type: "OP", op });
+    const made = this.madeAt.get(op.op_id);
+    if (made !== undefined) { // the first send only: the edit's root span
+      this.madeAt.delete(op.op_id);
+      this.record(null, { op_id: op.op_id, name: "client.send", start_ms: made, end_ms: this.physicalNow() });
+    }
+  }
+
+  /** Adds to the next telemetry report; sends it within 10s, or at once when it is full. */
+  private record(syncMs: number | null, span: TelemetrySpan | null): void {
+    if (!this.opts.telemetry) return;
+    const keep = syncMs !== null && syncMs >= 0 && syncMs <= 60_000;
+    // Up to two items arrive at once: send first if they would not fit (the gateway refuses a
+    // report over TELEMETRY_MAX, losing all of it).
+    if (this.telemetryBuf.sync_ms.length + this.telemetryBuf.spans.length + (keep ? 1 : 0) + (span ? 1 : 0) > TELEMETRY_MAX) this.flushTelemetry();
+    const b = this.telemetryBuf;
+    if (keep) b.sync_ms.push(Math.round(syncMs));
+    if (span) b.spans.push(span);
+    if (b.sync_ms.length + b.spans.length >= TELEMETRY_MAX) this.flushTelemetry();
+    else this.telemetryTimer ??= setTimeout(() => this.flushTelemetry(), 10_000);
+  }
+
+  /** Hands over what was measured since the last report (also on close). */
+  flushTelemetry(): void {
+    if (this.telemetryTimer) clearTimeout(this.telemetryTimer);
+    this.telemetryTimer = null;
+    const b = this.telemetryBuf;
+    if (!this.opts.telemetry || b.sync_ms.length + b.spans.length === 0) return;
+    this.telemetryBuf = { sync_ms: [], spans: [] };
+    try {
+      this.opts.telemetry(b);
+    } catch {
+      // a report is never worth an error
+    }
   }
 
   // ---- server messages (§7.5) --------------------------------------------------------------
@@ -573,10 +635,17 @@ export class SyncClient {
         if (this.syncTimer) clearTimeout(this.syncTimer);
         this.catchUp(m);
         break;
-      case "OP_BROADCAST":
-        this.learnUser(m.op as Op, m.user_id);
-        this.confirmedOp(m.op as Op, m.version as number, true);
+      case "OP_BROADCAST": {
+        const op = m.op as Op;
+        const received = this.physicalNow();
+        this.learnUser(op, m.user_id);
+        this.confirmedOp(op, m.version as number, true);
+        if (this.opts.telemetry && op.replica_id !== this.replicaId) { // another client's edit
+          const shown = this.physicalNow();
+          this.record(shown - op.hlc.physical_ms, { op_id: op.op_id, name: "peer.render", start_ms: received, end_ms: shown });
+        }
         break;
+      }
       case "PRESENCE_UPDATE": {
         // One entry per connection; "left" removes that connection only, and may arrive more
         // than once (several gateways sweep the same board).

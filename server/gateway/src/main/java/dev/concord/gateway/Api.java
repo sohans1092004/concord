@@ -2,6 +2,8 @@ package dev.concord.gateway;
 
 import dev.concord.common.Config;
 import dev.concord.common.Msg;
+import dev.concord.common.Tracing;
+import dev.concord.common.Prom;
 import dev.concord.common.Passwords;
 import dev.concord.common.RedactingJsonEncoder;
 import dev.concord.common.RedisKeys;
@@ -69,16 +71,19 @@ final class Api {
     private final LongSupplier clock;
     /** Sign-in limits, as Reliant's: per email 5 then 1/min, per IP 30 then 1 per 10s. In memory, like amendment 7. */
     private final Map<String, TokenBucket> limits = new ConcurrentHashMap<>();
+    private final Prom prom;
     private final String dummyHash = Passwords.hash(Secrets.random());
 
-    Api(Javalin app, DataSource db, RedisCommands<String, String> redis, Config config, LongSupplier clock) {
+    Api(Javalin app, DataSource db, RedisCommands<String, String> redis, Config config, LongSupplier clock, Prom prom) {
+        this.prom = prom;
         this.db = db;
         this.redis = redis;
         this.config = config;
         this.clock = clock;
         app.before("/api/*", this::sameOrigin);
         app.exception(SQLException.class, (e, ctx) -> {
-            log.warn("storage unavailable: {}", e.toString());
+            log.atWarn().addKeyValue("path", ctx.path()).addKeyValue("board_id", ctx.pathParamMap().get("board"))
+                    .log("storage unavailable: {}", e.toString());
             json(ctx.status(503), Msg.obj("error", "storage unavailable, try again"));
         });
         app.exception(HttpResponseException.class, (e, ctx) -> json(ctx.status(e.getStatus()), Msg.obj("error", e.getMessage())));
@@ -100,6 +105,7 @@ final class Api {
         app.delete("/api/boards/{board}/members/{user}", this::removeMember);
         app.get("/api/boards/{board}/history", this::history);
         app.post("/api/bug-reports", this::bugReport);
+        app.post("/api/telemetry", this::telemetry);
     }
 
     // ---- guards ----------------------------------------------------------------------------
@@ -484,6 +490,48 @@ final class Api {
                 id, UUID.fromString(u.id()), board == null ? null : UUID.fromString((String) board), description, redacted);
         log.atInfo().addKeyValue("user_id", u.id()).addKeyValue("report_id", id.toString()).log("bug report received");
         json(ctx.status(201), Msg.obj("id", id.toString()));
+    }
+
+    /** Items one telemetry report may carry (sync latency samples plus spans). */
+    static final int MAX_TELEMETRY = 100;
+
+    /**
+     * SPEC 9.5: what only a client can measure. Sync latency samples (an op created elsewhere
+     * until shown here, ms) go into a histogram; the two client spans (client.send, the edit's
+     * root, and peer.render) go into the op's trace. Bounded: signed in, one report per 10s per
+     * user (burst 2), at most 100 items, every value range-checked; anything else is dropped.
+     */
+    private void telemetry(Context ctx) throws SQLException {
+        User u = auth(ctx);
+        if (!allowed("telemetry:" + u.id(), 0.1, 2)) {
+            prom.inc("telemetry_rejected", "reason", "rate");
+            throw new HttpResponseException(429, "one telemetry report per 10s");
+        }
+        Map<?, ?> b = body(ctx);
+        List<?> sync = b.get("sync_ms") instanceof List<?> l ? l : List.of();
+        List<?> spans = b.get("spans") instanceof List<?> l ? l : List.of();
+        if (sync.size() + spans.size() > MAX_TELEMETRY) {
+            prom.inc("telemetry_rejected", "reason", "size");
+            throw new HttpResponseException(413, "at most " + MAX_TELEMETRY + " items per report");
+        }
+        long now = clock.getAsLong(), accepted = 0;
+        for (Object o : sync) {
+            if (o instanceof Number n && n.doubleValue() >= 0 && n.doubleValue() <= 60_000) {
+                prom.observe("sync_latency_ms", Prom.MS, n.doubleValue());
+                accepted++;
+            }
+        }
+        for (Object o : spans) {
+            if (!(o instanceof Map<?, ?> s) || !(s.get("op_id") instanceof String op) || Tracing.traceId(op) == null) continue;
+            if (!(s.get("start_ms") instanceof Number a) || !(s.get("end_ms") instanceof Number e)) continue;
+            long start = a.longValue(), end = e.longValue();
+            if (end < start || end - start > 60_000 || Math.abs(start - now) > 3_600_000) continue;
+            if ("client.send".equals(s.get("name"))) Tracing.root(op, "client.send", start * 1_000_000L, end * 1_000_000L, "user_id", u.id());
+            else if ("peer.render".equals(s.get("name"))) Tracing.span(op, "peer.render", start * 1_000_000L, end * 1_000_000L, "user_id", u.id());
+            else continue;
+            accepted++;
+        }
+        json(ctx, Msg.obj("accepted", accepted));
     }
 
     // ---- helpers ---------------------------------------------------------------------------
