@@ -95,7 +95,7 @@ Exactly one Session instance owns a board at a time (ADR-004, ADR-007).
 | Target | Spec | Measured | Verdict |
 |---|---|---|---|
 | Convergence | Identical state, any order | Byte-identical canonical state across both cores in every vector and fuzz run; every drill, load test and live deploy check ends with all clients on one SHA-256 | **Met** |
-| Durability | No ACKed op lost | 0 ACKed ops missing in every drill, load test, soak and live deploy (6 deploys under live editing, 1,834–2,797 ops each) | **Met** |
+| Durability | No ACKed op lost | 0 ACKed ops missing in every drill, load test, soak and live deploy (7 deploys under live editing, 1,834–2,797 ops each) | **Met** |
 | Sync latency | p95 < 200ms, p99 < 500ms at 2–10 editors | p95 32–45ms, p99 33–94ms (laptop); from India to Sydney, p95 315–354ms, of which the server is about 17ms | **Met on the server; missed end to end** from a distant region |
 | Editors per board | 30, correct; latency recorded | p95 42ms at 30; 3,756 ops, all converged, 0 missing | **Met** |
 | Cards per board | 2,000, render < 16ms per update | p50 4.8ms, p99 ≤13.8ms; max 19.9 / 26.3ms (2 of ~600 per run) | **Not met** (≈0.3% of updates) |
@@ -168,7 +168,7 @@ All 15 failure scenarios in §8 are handled. The eight marked "drill" were induc
 | 12 | Malformed or malicious op | Rejected before persist; logged with user and reason | e2e and server tests |
 | 13 | Snapshot corrupt | Hash mismatch → previous snapshot + longer tail | `SnapshotTest`; `RetentionTest` with two snapshots corrupted |
 | 14 | Reconnect storm | Client jitter (no rate limit needed: amendment 30) | 500 clients back in 3.5–16.2s; [007](../production/incident-reports/007-reconnect-storm.md) |
-| 15 | Rolling deploy | Gateway drains with `RECONNECT_ELSEWHERE`; owners hand over | 6 deploys under live editing, 0 lost; [008](../production/incident-reports/008-rolling-deploy.md) |
+| 15 | Rolling deploy | Gateway drains with `RECONNECT_ELSEWHERE`; owners hand over | 7 deploys under live editing, 0 lost; [008](../production/incident-reports/008-rolling-deploy.md) |
 
 ### Real bugs, and how each was found
 
@@ -322,6 +322,5 @@ Ten ADRs in `docs/adr/`. Thirty-two amendments to the spec are recorded with the
 ## Open gaps
 
 - **Profile the large board's slow renders** (about 1 in 300 over 16ms) and fix them, or argue a looser bound with evidence. The test stays strict until then.
-- **Deploy the pacing fix and the 5ms window to the trial host** (amendments 31 and 32): built, tested and measured locally, not yet deployed.
 - **The trial's bug reports:** none have arrived. Each one that reveals a bug gets a postmortem in `production/incident-reports/`.
 - **The manual offline hour** (`docs/manual-offline-run.md`) is for the project owner to do by hand; only the scripted hour is recorded.

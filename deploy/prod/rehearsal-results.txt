@@ -203,3 +203,16 @@ deploy output: backup 09:36:11-09:36:23 (0 users/boards/ops); schema version 2 a
   done 09:37:32 UTC; "ok <- public /healthz"; "404 <- public /metrics/prometheus (internal only)";
   rollback printed: git checkout --detach 41b6b9a35e4e... && deploy/prod/deploy.sh 41b6b9a35e4e...
 result: /metrics no longer public
+
+## Fifth trial deploy: 1b3c843 (client send pacing, amendment 31; 5ms commit window, amendment 32; 2026-10-18)
+command (VM): git fetch && git checkout --detach 1b3c84369e10... && deploy/prod/deploy.sh 1b3c84369e10473456c2685fcc7a43c7f1ce036f, from e274eba4b6dd
+backup 12:33:37-12:33:50 (1 user, 1 board, 206 ops); schema version 2 already applied; session1, session2, gateway
+replaced and healthy; caddy unchanged (Up 3 hours) and reloaded; done 12:34:59 UTC; "ok <- public /healthz";
+"404 <- public /metrics/prometheus (internal only)"; rollback printed: git checkout --detach e274eba4b6dd... && deploy/prod/deploy.sh e274eba4b6dd...
+live check during it (laptop in India, from 12:32:37 UTC):
+  SMOKE_URL=https://concord-serve.duckdns.org SMOKE_INVITE=<code> SMOKE_LIVE_SECONDS=300 npx vitest run test/smoke
+smoke: https://concord-serve.duckdns.org, board version 51, both on d33ae8282022..., 9856ms
+latency: edit on one client until the other shows it, n=30: p50 318 ms, p95 341 ms, max 349 ms; target 200 ms: missed at p95
+LIVE {"url":"https://concord-serve.duckdns.org","seconds":300,"submitted":2350,"acked":2351,"board_version":2351,"history":2351,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+Tests 2 passed (2)
+result: deploy passed, 0 ACKed ops missing, 0 Unsent edits, converged; /metrics closed

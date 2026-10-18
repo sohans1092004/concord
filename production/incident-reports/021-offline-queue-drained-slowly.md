@@ -1,6 +1,6 @@
 # Incident 021: a long offline queue took far too long to sync
 
-**Date:** 2026-10-18 · **Type:** client bug, found by the §10.1 offline measurement · **Environment:** dev compose stack, the accelerated 8h and 24h offline runs · **Status:** fixed by amendment 31, commit `816037b`; not yet deployed to the trial host
+**Date:** 2026-10-18 · **Type:** client bug, found by the §10.1 offline measurement · **Environment:** dev compose stack, the accelerated 8h and 24h offline runs · **Status:** fixed by amendment 31, commit `816037b`; deployed to the trial host in `1b3c843` (2026-10-18, 2,351 ops through the deploy, 0 lost)
 
 ## Summary
 

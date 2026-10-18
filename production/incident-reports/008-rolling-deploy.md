@@ -21,6 +21,7 @@ Nothing in the edit path. The deploy process itself had gaps, found during the 2
 | Rehearsal of `1000c46` and its rollback (2026-10-18) | 1,834 and 1,854 | 0 | 0 | 3 each | yes |
 | Trial host, `1000c46` (amendment 27) | 2,315 | 0 | 0 | 3 | yes |
 | Trial host, `41b6b9a` | 2,306 | 0 | 0 | 3 | yes |
+| Trial host, `1b3c843` (pacing, 5ms window) | 2,351 | 0 | 0 | 3 | yes |
 
 The other two trial deploys (`eca3941`, `e274eba`) ran without the live-editing test. Each ended healthy with the public health check passing.
 

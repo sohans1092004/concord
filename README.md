@@ -10,7 +10,7 @@ Under it is a CRDT engine written twice, in TypeScript for the browser and Java 
 
 | Promise | Evidence |
 |---|---|
-| **No acknowledged edit is ever lost** | 0 ACKed edits missing in every drill, load test, soak and live deploy: owner killed, owner frozen, Postgres down, Redis down or wiped, 500-client reconnect storm, 6 rolling deploys under live editing |
+| **No acknowledged edit is ever lost** | 0 ACKed edits missing in every drill, load test, soak and live deploy: owner killed, owner frozen, Postgres down, Redis down or wiped, 500-client reconnect storm, 7 rolling deploys under live editing |
 | **Every replica converges** | 55 hand-written conformance vectors; a permutation fuzz (500 seeds per commit, 100,000 nightly) in both languages; a differential fuzz TypeScript against Java; every test ends with all clients on one SHA-256 |
 | **Changes show up fast** | Edit on one client to visible on another: p95 **32ms** with 2 editors, **42ms** with 30 (laptop). From India to the Sydney host: p95 ~315–354ms, of which the server is about 17ms |
 | **A day offline is fine** | 24 accelerated hours of offline edits (5,701) sync in 283s, 0 lost. A real-time hour in two Chromium browsers: 240 edits, converged 11.5s after reconnecting |

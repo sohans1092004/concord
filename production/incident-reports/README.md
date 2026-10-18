@@ -13,7 +13,7 @@ Postmortems in Reliant's format: what broke, impact, detection, root cause, fix,
 | [005](005-redis-down.md) | Redis down (row 5) | Held: 268 ACKs during a 15.8s outage |
 | [006](006-redis-wiped.md) | Redis wiped (row 6) | Held. The drill asserted the wrong thing once (`ade7f57`) |
 | [007](007-reconnect-storm.md) | Reconnect storm, 500 clients (row 14) | Held without a rate limit (amendment 30). The drill's first check was wrong (`3a3284c`) |
-| [008](008-rolling-deploy.md) | Rolling deploy under live editing (row 15) | Held in 6 recorded deploys: 0 missing, 0 unsent |
+| [008](008-rolling-deploy.md) | Rolling deploy under live editing (row 15) | Held in 7 recorded deploys: 0 missing, 0 unsent |
 
 **Bugs.**
 
