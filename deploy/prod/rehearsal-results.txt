@@ -111,3 +111,19 @@ deploy.sh exit 0
 LIVE {"url":"https://des-pro-notification-serum.trycloudflare.com","seconds":240,"submitted":1832,"acked":1833,"board_version":1833,"history":1833,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
 restore of the backup taken by the rollback (rehearse.sh ./restore.sh <key> latest): RESTORE VERIFIED: concord-20261017T200809Z.tar.age (202 ops, 1 board, 0 problems)
 result: deploy A->B and rollback B->A both passed: 0 ACKed ops missing, 0 Unsent edits, every client rejoined once and converged; afterwards every app container ran the target tag
+
+## On the real host (AWS t4g.small, ap-southeast-2, concord-serve.duckdns.org), 2026-10-18
+- Install by pull (CONCORD_TAG d940470): all services healthy in ~20s; Let's Encrypt certificate obtained;
+  /healthz ok over HTTPS; backups to B2 (a key shown in a screenshot was rotated, then a second backup
+  with the new key: kept 2). Memory after start: 776 MiB available of 1,834, swap 0; Caddy reached its
+  48 MiB limit with file cache once (anonymous 11.3 MiB, 0 restarts, 0 OOM kills).
+- Smoke test from the laptop in India: passed. Sync latency (edit on one client until the other shows
+  it), n=30: p50 317 ms, p95 354 ms, max 359 ms; the 200 ms target is MISSED at p95.
+  Round trip from this laptop to the VM: TCP connect 298-312 ms (5 of 6 samples; ICMP is blocked by the
+  security group). An edit needs about one round trip (half to the server, half from it to the other
+  client), so the server accounts for about 17 ms of the 317 ms; the miss is network distance to Sydney.
+- Restore check from the laptop failed before touching data: age in the backup container could not read
+  the mounted key file (root-made, mode 600: "permission denied"). restore.sh now passes the key on
+  stdin into a private file in the throwaway container. Reproduced on the rehearsal stack with a
+  root-owned 600 key: old script failed (there: "/identity: is a directory", the mount of that path
+  failed), new script: RESTORE VERIFIED.

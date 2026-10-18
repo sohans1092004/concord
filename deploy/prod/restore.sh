@@ -21,7 +21,7 @@ work=$(mktemp -d "$PWD/restore-work.XXXX")
 chmod 777 "$work"
 cleanup() { docker rm -f concord-restore-pg >/dev/null 2>&1 || true; docker network rm concord-restore >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
-bk() { docker compose run --rm --no-deps -T -v "$work:/work" -v "$(cd "$(dirname "$identity")" && pwd)/$(basename "$identity"):/identity:ro" backup "$@"; }
+bk() { docker compose run --rm --no-deps -T -v "$work:/work" backup "$@"; }
 
 # 1. The backup file.
 if [ "$which" = latest ]; then
@@ -35,7 +35,10 @@ else
 fi
 
 # 2. Decrypt and unpack: concord.dump and manifest.json.
-bk bash -c 'age -d -i /identity /work/backup.tar.age | tar -C /work -xf -'
+# The key goes in on stdin, into a private file in the throwaway container: a mounted key file
+# need not be readable by the container's user (age-keygen writes mode 600, and a key made by
+# root, or by the VM's ubuntu user, is then unreadable to uid 10001: "permission denied").
+bk bash -c 'set -o pipefail; umask 077; cat > /tmp/identity; age -d -i /tmp/identity /work/backup.tar.age | tar -C /work -xf -' < "$identity"
 echo "manifest: $(head -c 300 "$work/manifest.json")..."
 
 verify() { # $1: network, $2: JDBC URL, $3: user, $4: password
