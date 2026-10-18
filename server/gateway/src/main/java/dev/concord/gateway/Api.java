@@ -51,6 +51,7 @@ import org.slf4j.LoggerFactory;
  *   DELETE /api/boards/{id}/members/{user_id}   owners, or a member leaving
  *   GET    /api/boards/{id}/history?before_version=&amp;limit=   30 days, newest first
  *   POST   /api/bug-reports         {board_id?, description, diagnostics}
+ *   POST   /api/telemetry           {sync_ms[], spans[]}: at most 100 items, one per 10s per user
  * </pre>
  *
  * Every state-changing call must be JSON and must come from an allowed Origin; a request with
