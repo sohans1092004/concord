@@ -216,3 +216,15 @@ latency: edit on one client until the other shows it, n=30: p50 318 ms, p95 341 
 LIVE {"url":"https://concord-serve.duckdns.org","seconds":300,"submitted":2350,"acked":2351,"board_version":2351,"history":2351,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
 Tests 2 passed (2)
 result: deploy passed, 0 ACKed ops missing, 0 Unsent edits, converged; /metrics closed
+
+## On the host after the fifth deploy (2026-10-18 12:47:56 UTC): retention and summary.sh confirmed
+command (VM): cd ~/concord/deploy/prod && ./summary.sh; docker compose logs gateway | grep "op retention"
+op retention ran: 12:44:37 UTC (10 min after the gateway started), ops_deleted 0, 4 ms (nothing is 30 days old)
+summary.sh metrics section (read inside the network): session1 commit 1,709 samples, p50 <= 5 ms, p95 <= 10 ms;
+  committed_ops_total 1,842, claims_total 1, boards_deleted_total 1; gateway connections_opened_total 4;
+  sync latency (client-reported): no samples (only the web app reports telemetry; the smoke test's clients do not)
+logs (24h): errors 0, warnings 0 on gateway, session1, session2, backup; fence rejections 0; commit failures 0
+memory: gateway 161.7/320 MiB, session1 134.2/288, session2 111.9/288, postgres 32.2/224, redis 5.4/40, caddy 16.5/48,
+  backup 0.8/128; host 720 MiB available of 1,834; disk 29%
+data: 0 users, 0 boards. The "1 user, 1 board" in today's backups (09:03, 09:09, 12:33) was each time the smoke
+  test's own account during its live check, deleted when it finished: no trial users yet.
