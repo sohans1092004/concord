@@ -198,4 +198,8 @@ fix: mount the directory deploy/prod/caddy (caddy/Caddyfile) instead of the file
 ## Fourth trial deploy: e274eba (Caddy config directory mounted; 2026-10-18)
 command (VM): git fetch && git checkout --detach e274eba4b6dd... && deploy/prod/deploy.sh e274eba4b6dd6ecde5a0abd2061c58280be6eb40
 checked from the laptop afterwards (09:38 UTC): /metrics 404, /metrics/prometheus 404, /healthz 200
-result: /metrics no longer public (deploy output to be added)
+deploy output: backup 09:36:11-09:36:23 (0 users/boards/ops); schema version 2 already applied; session1,
+  session2, gateway replaced and healthy; caddy recreated (volume changed: "Up 1 second") and reloaded;
+  done 09:37:32 UTC; "ok <- public /healthz"; "404 <- public /metrics/prometheus (internal only)";
+  rollback printed: git checkout --detach 41b6b9a35e4e... && deploy/prod/deploy.sh 41b6b9a35e4e...
+result: /metrics no longer public
