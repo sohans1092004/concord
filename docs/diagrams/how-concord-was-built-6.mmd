@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant O as BoardActor (fence 7)
+  participant PG as Postgres
+  O->>PG: BEGIN
+  O->>PG: SELECT op_id, version FROM<br/>board_ops WHERE op_id =<br/>ANY(batch)
+  Note over O: ops already stored are<br/>duplicates: answer with<br/>their stored version
+  O->>PG: UPDATE boards SET version =<br/>version + n WHERE id = ? AND<br/>fence = 7 RETURNING version
+  alt zero rows
+    PG-->>O: nothing
+    Note over O: board row gone = deleted<br/>(amendment 27), otherwise<br/>fenced out: NOT_OWNER, close
+  else version v
+    O->>PG: INSERT n ops with versions<br/>v-n+1 .. v
+    O->>PG: COMMIT (only if the 2 s<br/>budget is not spent)
+    PG-->>O: ok
+    Note over O: now apply to memory,<br/>remember in LRU, ACK,<br/>publish
+  end

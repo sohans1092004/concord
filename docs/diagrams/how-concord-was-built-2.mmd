@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  participant A as Browser A (client-core)
+  participant IDB as IndexedDB
+  participant G as Gateway
+  participant O as Owner (BoardActor)
+  participant PG as Postgres
+  participant R as Redis Pub/Sub
+  participant B as Browser B
+  A->>A: stamp op (HLC tick), plan<br/>keys
+  A->>IDB: append op to the log
+  IDB-->>A: durable
+  A->>A: show it (optimistic view)
+  A->>G: OP (paced: 20/s, burst 50)
+  G->>G: rate limit, then queue (one<br/>request at a time per<br/>connection)
+  G->>O: forward (owner from 5s cache<br/>/ Redis)
+  O->>O: dedup (LRU), validate shape,<br/>role, clock, references
+  O->>O: add to batch (5 ms window)
+  O->>PG: one transaction: drop known<br/>op_ids, UPDATE ... WHERE<br/>fence = :fence, INSERT ops
+  PG-->>O: COMMIT ok (versions)
+  O->>O: apply to memory
+  O-->>G: OP_ACK {op_id, version}
+  G-->>A: OP_ACK, op leaves the queue
+  O->>R: PUBLISH board:id {op,<br/>version}
+  R-->>G: message
+  G-->>B: OP_BROADCAST
+  B->>B: merge, render ("moved by" if<br/>B's own move lost)

@@ -11,7 +11,7 @@ A new owner rebuilds a board from its newest valid snapshot plus the tail of ops
 - **An owner snapshots a board after 500 ops, or 60s after its last snapshot if anything changed** (`BoardActor.SNAPSHOT_EVERY_OPS`, `SNAPSHOT_EVERY_MS`). A graceful handover (§2.4) and an idle unload (amendment 26) also snapshot.
 - **Every snapshot stores the SHA-256 of its canonical encoding;** a claim loads the newest one whose hash matches and replays the ops above it.
 - **Keep three.** A corrupt newest snapshot falls back to the one before, with a longer tail.
-- **Op retention deletes only ops at or below the *oldest* kept snapshot** and older than 30 days (amendment 28), so every fallback still has its complete tail.
+- **Op retention deletes only ops at or below the *oldest* kept snapshot** and older than 35 days (history shows 30) (amendment 28), so every fallback still has its complete tail.
 
 ## What the measurements show
 
@@ -27,7 +27,7 @@ From the kill to the first ACK took 13–20s in every case. That is almost all t
 ## Alternatives
 
 - **Snapshot more often (every 100 ops).** It shortens a replay that is already under a second, and writes a 0.9 MB snapshot five times as often on large boards.
-- **Snapshot less often (every 5,000 ops).** Ten times the worst tail. Replay is cheap per op, but the tail also bounds retention, so `board_ops` would keep up to ten times as many rows past the 30-day window.
+- **Snapshot less often (every 5,000 ops).** Ten times the worst tail. Replay is cheap per op, but the tail also bounds retention, so `board_ops` would keep up to ten times as many rows past the 35-day window.
 - **Only by time, or only by count.** Count alone leaves a quiet board's last edits unsnapshotted for good; time alone writes snapshots of a busy board every minute regardless of how much changed. The 60s rule fires only when something changed.
 - **Keep one snapshot.** A single corrupt snapshot would force replay from version 0, which retention may already have deleted. Keeping three, with retention bounded by the oldest, keeps a fallback complete (`RetentionTest`, guard check `retention-oldest-snapshot`).
 

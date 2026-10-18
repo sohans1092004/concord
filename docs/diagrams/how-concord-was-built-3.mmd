@@ -1,0 +1,19 @@
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant C as client-core
+  participant IDB as IndexedDB (log + snapshot)
+  participant G as Gateway
+  participant O as Owner
+  Note over C,G: network gone: no close event<br/>(Chromium), so 15 s of<br/>silence drops the socket
+  U->>C: edits (many)
+  C->>IDB: append each op to the log,<br/>then show it
+  C->>IDB: snapshot about once a<br/>second, replacing the log<br/>entries it contains
+  Note over C: reload or crash: load =<br/>snapshot + later log entries
+  C->>C: reconnect with backoff (0.5<br/>s x 2^n, max 30 s, full<br/>jitter)
+  C->>G: ticket (REST) then WebSocket<br/>JOIN {since_version}
+  G->>O: JOIN
+  O-->>C: JOINED: ops after<br/>since_version (or a snapshot<br/>if far behind),<br/>server_time_ms
+  C->>C: merge the catch-up under its<br/>pending ops
+  C->>G: resend the whole pending<br/>queue, in order, paced 20/s
+  O-->>C: OP_ACK for each (a duplicate<br/>gets its original ACK)

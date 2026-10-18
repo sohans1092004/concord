@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant A as Owner A (fence 1)
+  participant R as Redis
+  participant PG as Postgres
+  participant B as Instance B
+  A->>A: op X in batch, then A pauses<br/>(GC)
+  Note over R: A's lease expires (15 s)
+  B->>R: INCR fence = 2, SET lease NX
+  B->>PG: load snapshot + tail<br/>(without X)
+  A->>PG: commit X WHERE fence <= 1
+  Note over PG: boards.fence is still 1, so<br/>the commit succeeds
+  PG-->>A: COMMIT
+  A-->>A: OP_ACK X to the client
+  B->>PG: first commit, fence 2 (now<br/>boards.fence = 2)
+  Note over B: B's memory and every later<br/>snapshot lack X, an ACKed op

@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant C as Client
+  participant G as Gateway
+  participant O as Owner
+  participant P as Postgres
+  participant R as Redis
+  C->>G: 1 OP (saved locally first)
+  G->>O: 2 forward, in order
+  O->>O: 3 dedup, validate, batch 5<br/>ms
+  O->>P: 4 UPDATE ... WHERE fence =<br/>f, INSERT
+  P-->>O: 5 COMMIT
+  O-->>C: 6 OP_ACK (after commit)
+  O->>R: 7 PUBLISH, gateways deliver

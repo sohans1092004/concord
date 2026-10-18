@@ -1,0 +1,27 @@
+erDiagram
+  users ||--o{ sessions : "signs in"
+  users ||--o{ ws_tickets : "connects"
+  users ||--o{ board_members : "is member"
+  boards ||--o{ board_members : "has"
+  boards ||--o{ board_ops : "history"
+  boards ||--o{ board_snapshots : "kept 3"
+  users ||--o{ bug_reports : "files"
+  boards {
+    uuid id PK
+    bigint version "last committed op"
+    bigint fence "highest owner fence"
+  }
+  board_ops {
+    uuid board_id PK
+    uuid op_id PK
+    bigint version "UNIQUE with board_id"
+    jsonb payload
+    bigint fence
+    uuid user_id
+  }
+  board_snapshots {
+    uuid board_id PK
+    bigint version PK
+    jsonb state
+    text sha256
+  }

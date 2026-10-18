@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant A as Owner A (fence 1)
+  participant R as Redis
+  participant B as Instance B
+  participant PG as Postgres
+  Note over A: docker pause, and A's Redis<br/>route cut
+  Note over R: lease expires
+  B->>R: fence 2, lease
+  B->>PG: UPDATE boards SET fence = 2
+  B->>B: serving
+  Note over A: unpaused: requests queued in<br/>its socket
+  A->>R: renew lease (fails: Redis<br/>unreachable, A keeps<br/>serving)
+  A->>PG: commit WHERE fence = 1
+  PG-->>A: 0 rows
+  A->>A: ALERT fenced out, NOT_OWNER,<br/>close (nothing stored,<br/>nothing broadcast)

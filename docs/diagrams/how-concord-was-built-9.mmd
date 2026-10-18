@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> connecting: open()
+  connecting --> joined: JOINED
+  connecting --> offline: ticket failed, socket closed, or 10 s without JOINED
+  joined --> offline: socket closed, 15 s silent, or browser offline event
+  offline --> connecting: backoff timer (0.5 s x 2^n, max 30 s, jitter), or browser online event
+  connecting --> unauthorized: UNAUTHORIZED in reply to JOIN (not a member)
+  joined --> closed: close()
+  unauthorized --> [*]
+  closed --> [*]

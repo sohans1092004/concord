@@ -1,0 +1,20 @@
+sequenceDiagram
+  participant C as Clients
+  participant G as Gateway
+  participant S1 as session1 (owner, fence 1)
+  participant R as Redis
+  participant S2 as session2
+  participant PG as Postgres
+  S1-xS1: killed (SIGKILL)
+  C->>G: OP
+  G->>S1: forward
+  G-->>C: UNAVAILABLE (link down),<br/>client keeps the op queued
+  Note over R: lease expires within 15 s
+  G->>R: board:owner:id exists? (1 s<br/>watchdog) no
+  G->>S2: ENSURE (preferred by<br/>rendezvous hash)
+  S2->>R: fence 2, lease NX
+  S2->>PG: UPDATE boards SET fence = 2,<br/>load snapshot + tail
+  S2->>R: announce owner
+  C->>G: resend queue in order
+  G->>S2: forward
+  S2-->>C: OP_ACK (duplicates get their<br/>original ACK)

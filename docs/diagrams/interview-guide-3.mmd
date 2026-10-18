@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant A as Old owner A (fence 1)
+  participant P as Postgres
+  participant B as New owner B
+  Note over A: paused with op X in its<br/>batch
+  B->>P: write fence 2 (the fix:<br/>before loading)
+  B->>P: load snapshot + tail
+  A->>P: commit X WHERE fence = 1
+  P-->>A: 0 rows: NOT_OWNER, X never<br/>ACKed

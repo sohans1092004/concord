@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph Browsers
+    C1["Browser A<br/>React + client-core<br/>IndexedDB queue"]
+    C2["Browser B<br/>React + client-core<br/>IndexedDB queue"]
+  end
+  subgraph Gateways["Gateways (stateless)"]
+    G1["gateway 1<br/>WebSockets, REST API<br/>rate limit, fan-out"]
+    G2["gateway 2"]
+  end
+  subgraph Sessions["Session instances"]
+    S1["session 1<br/>BoardActor per board<br/>validate, group commit, apply"]
+    S2["session 2"]
+  end
+  PG[("Postgres<br/>board_ops, snapshots,<br/>boards.fence, users")]
+  R[("Redis<br/>leases, owner keys,<br/>fence counters, presence,<br/>Pub/Sub board:id")]
+  C1 -- "WebSocket: JOIN, OP" --> G1
+  C2 -- WebSocket --> G2
+  G1 -- "internal WebSocket<br/>(shared secret)" --> S1
+  G2 --> S1
+  S1 -- "1. commit (fence checked)" --> PG
+  S1 -- "2. PUBLISH board:id" --> R
+  R -- "OP_BROADCAST" --> G1
+  R -- OP_BROADCAST --> G2
+  S1 -. "lease renew every 5s" .-> R
+  G1 -. "owner lookup" .-> R
+  S2 -. "claims boards whose lease expired" .-> R

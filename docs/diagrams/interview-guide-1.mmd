@@ -1,0 +1,7 @@
+flowchart LR
+  B[Browsers<br/>client-core + IndexedDB] --> G[Gateways<br/>stateless]
+  G --> S[Session instances<br/>one actor per board]
+  S -- commit, fence --> P[(Postgres)]
+  S -- publish --> R[(Redis)]
+  R -- broadcast --> G
+  G -- broadcast --> B

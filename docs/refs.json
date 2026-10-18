@@ -1,0 +1,506 @@
+{
+ ".github/workflows/ci.yml#L286": {
+  "anchor": "needs: [vectors, crdt-ts, crdt-java, differential, arm64, server, client-core, e2e, web"
+ },
+ "client-core/src/client.ts#L136": {
+  "anchor": "export const JOIN_TIMEOUT_MS = 10_000;"
+ },
+ "client-core/src/client.ts#L143": {
+  "anchor": "export const SILENCE_MS = 15_000;"
+ },
+ "client-core/src/client.ts#L149": {
+  "anchor": "export function backoffMs("
+ },
+ "client-core/src/client.ts#L153": {
+  "anchor": "export class SyncClient {"
+ },
+ "client-core/src/client.ts#L216": {
+  "anchor": "private readonly onOffline"
+ },
+ "client-core/src/client.ts#L359": {
+  "anchor": "submit(body: Body): Op"
+ },
+ "client-core/src/client.ts#L378": {
+  "anchor": "const failed = (e: unknown) => {"
+ },
+ "client-core/src/client.ts#L594": {
+  "anchor": "private pump()"
+ },
+ "client-core/src/client.ts#L663": {
+  "anchor": "case \"JOINED\": {"
+ },
+ "client-core/src/client.ts#L677": {
+  "anchor": "for (const op of this.pending) this.sendOp(op);"
+ },
+ "client-core/src/client.ts#L680": {
+  "anchor": "this.silenceTimer = setInterval"
+ },
+ "client-core/src/client.ts#L731": {
+  "anchor": "private catchUp(m: Msg)"
+ },
+ "client-core/src/client.ts#L759": {
+  "anchor": "private confirmedOp(op: Op, version: number, broadcast: boolean)"
+ },
+ "client-core/src/client.ts#L780": {
+  "anchor": "private acked(opId: string, version: number)"
+ },
+ "client-core/src/client.ts#L809": {
+  "anchor": "private error(m: Msg)"
+ },
+ "client-core/src/client.ts#L837": {
+  "anchor": "if (this.clock.physical_ms > this.physicalNow())"
+ },
+ "client-core/src/client.ts#L873": {
+  "anchor": "private scheduleQueueResend()"
+ },
+ "client-core/src/client.ts#L898": {
+  "anchor": "private viewBoard()"
+ },
+ "client-core/src/client.ts#L935": {
+  "anchor": "private placeAt("
+ },
+ "client-core/src/client.ts#L946": {
+  "anchor": "private checkMoves()"
+ },
+ "client-core/src/client.ts#L989": {
+  "anchor": "private saveNow()"
+ },
+ "client-core/src/idb.ts#L102": {
+  "anchor": "static async open(boardId: string"
+ },
+ "client-core/src/idb.ts#L118": {
+  "anchor": "async load(): Promise<Saved | undefined>"
+ },
+ "client-core/src/idb.ts#L167": {
+  "anchor": "async save(state: Saved)"
+ },
+ "client-core/src/idb.ts#L176": {
+  "anchor": "async append(op: Op, seq: number)"
+ },
+ "client-core/src/idb.ts#L67": {
+  "anchor": "function openDb()"
+ },
+ "client-core/src/idb.ts#L8": {
+  "anchor": "Duplicated tab: browsers copy sessionStorage"
+ },
+ "client-core/src/idb.ts#L86": {
+  "anchor": "export class IndexedDbStorage implements Storage"
+ },
+ "client-core/src/storage.ts#L33": {
+  "anchor": "export interface Storage {"
+ },
+ "client-core/src/storage.ts#L43": {
+  "anchor": "export function merge("
+ },
+ "client-core/test/drills/drills.test.ts#L13": {
+  "anchor": "run(\"kill-owner\")(\"kill-owner\""
+ },
+ "client-core/test/load/load.test.ts#L26": {
+  "anchor": "class Latency {"
+ },
+ "crdt-ts/src/board.ts#L101": {
+  "anchor": "view(): View"
+ },
+ "crdt-ts/src/board.ts#L128": {
+  "anchor": "(home ? home.cards : orphaned).push"
+ },
+ "crdt-ts/src/board.ts#L35": {
+  "anchor": "export class Board {"
+ },
+ "crdt-ts/src/board.ts#L47": {
+  "anchor": "apply(op: Op): number"
+ },
+ "crdt-ts/src/hlc.ts#L25": {
+  "anchor": "export function compare("
+ },
+ "crdt-ts/src/hlc.ts#L37": {
+  "anchor": "export function tick("
+ },
+ "crdt-ts/src/hlc.ts#L43": {
+  "anchor": "export function receive("
+ },
+ "crdt-ts/src/keys.ts#L110": {
+  "anchor": "export function keyBetween("
+ },
+ "crdt-ts/src/keys.ts#L175": {
+  "anchor": "export function planInsert("
+ },
+ "crdt-ts/src/keys.ts#L29": {
+  "anchor": "export function validateKey("
+ },
+ "crdt-ts/src/keys.ts#L7": {
+  "anchor": "Upstream is released under CC0-1.0"
+ },
+ "crdt-ts/src/lww.ts#L23": {
+  "anchor": "export function pick(a: Register, b: Register)"
+ },
+ "crdt-ts/src/op.ts#L108": {
+  "anchor": "checkFieldValue(field: unknown, value: unknown)"
+ },
+ "crdt-ts/src/op.ts#L12": {
+  "anchor": "export const MAX_SKEW_MS = 60_000;"
+ },
+ "crdt-ts/src/op.ts#L128": {
+  "anchor": "export function checkShape(x: unknown)"
+ },
+ "crdt-ts/src/op.ts#L176": {
+  "anchor": "export function checkClock("
+ },
+ "crdt-ts/src/op.ts#L27": {
+  "anchor": "export type Op ="
+ },
+ "crdt-ts/src/op.ts#L63": {
+  "anchor": "const NUL = String.fromCharCode(0);"
+ },
+ "crdt-ts/src/orset.ts#L27": {
+  "anchor": "remove(id: string, observed: Iterable<string>)"
+ },
+ "crdt-ts/src/orset.ts#L36": {
+  "anchor": "liveTags(id: string): string["
+ },
+ "crdt-ts/src/orset.ts#L58": {
+  "anchor": "mergeFrom(other: OrSet): void"
+ },
+ "crdt-ts/test/board.test.ts#L29": {
+  "anchor": "apply agrees with merge"
+ },
+ "crdt-ts/test/fuzz.test.ts#L10": {
+  "anchor": "const RUNS = Number(process.env.FUZZ_RUNS ?? 500);"
+ },
+ "crdt-ts/test/fuzz/sim.ts#L207": {
+  "anchor": "if (kind < 6) {"
+ },
+ "crdt-ts/test/fuzz/sim.ts#L245": {
+  "anchor": "} else {"
+ },
+ "crdt-ts/test/fuzz/sim.ts#L315": {
+  "anchor": "export function minimize("
+ },
+ "crdt-ts/test/fuzz/sim.ts#L36": {
+  "anchor": "export function scenarioArb("
+ },
+ "crdt-ts/test/orset.test.ts#L24": {
+  "anchor": "merge is commutative, associative and idempotent"
+ },
+ "deploy/prod/caddy/Caddyfile#L23": {
+  "anchor": "@internal path /metrics /metrics/*"
+ },
+ "deploy/prod/compose.yaml#L16": {
+  "anchor": "= 1,336 MiB"
+ },
+ "deploy/prod/deploy.sh#L23": {
+  "anchor": "set -euo pipefail"
+ },
+ "deploy/prod/deploy.sh#L30": {
+  "anchor": "[ \"$head\" = \"$tag\" "
+ },
+ "docs/runbook.md#L39": {
+  "anchor": "The credits are finite"
+ },
+ "server/common/src/main/java/dev/concord/common/Config.java#L57": {
+  "anchor": "e.getOrDefault(\"CONCORD_BATCH_MS\", \"5\")"
+ },
+ "server/common/src/main/java/dev/concord/common/Config.java#L95": {
+  "anchor": "public Config checkPublic()"
+ },
+ "server/common/src/main/java/dev/concord/common/Migrate.java#L35": {
+  "anchor": "public static boolean run(DataSource ds)"
+ },
+ "server/common/src/main/java/dev/concord/common/Outbox.java#L41": {
+  "anchor": "public boolean send(String text)"
+ },
+ "server/common/src/main/java/dev/concord/common/Passwords.java#L18": {
+  "anchor": "static final int MEMORY_KIB = 19 * 1024"
+ },
+ "server/common/src/main/java/dev/concord/common/RedactingJsonEncoder.java#L17": {
+  "anchor": "static final Pattern SECRET"
+ },
+ "server/common/src/main/java/dev/concord/common/RedisKeys.java#L12": {
+  "anchor": "public static final long LEASE_MS = 15_000;"
+ },
+ "server/common/src/main/java/dev/concord/common/RedisKeys.java#L4": {
+  "anchor": "public final class RedisKeys {"
+ },
+ "server/common/src/main/java/dev/concord/common/Rendezvous.java#L30": {
+  "anchor": "public static List<Instance> order("
+ },
+ "server/common/src/main/java/dev/concord/common/Tracing.java#L72": {
+  "anchor": "public static String traceId(String opId)"
+ },
+ "server/common/src/main/resources/schema.sql#L14": {
+  "anchor": "CREATE TABLE sessions ("
+ },
+ "server/common/src/main/resources/schema.sql#L23": {
+  "anchor": "CREATE TABLE ws_tickets ("
+ },
+ "server/common/src/main/resources/schema.sql#L29": {
+  "anchor": "CREATE TABLE boards ("
+ },
+ "server/common/src/main/resources/schema.sql#L38": {
+  "anchor": "CREATE TABLE board_members ("
+ },
+ "server/common/src/main/resources/schema.sql#L4": {
+  "anchor": "CREATE TABLE users ("
+ },
+ "server/common/src/main/resources/schema.sql#L47": {
+  "anchor": "CREATE TABLE board_ops ("
+ },
+ "server/common/src/main/resources/schema.sql#L66": {
+  "anchor": "CREATE TABLE bug_reports ("
+ },
+ "server/common/src/main/resources/schema.sql#L75": {
+  "anchor": "CREATE TABLE board_snapshots ("
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Accounts.java#L35": {
+  "anchor": "static Deleted delete(DataSource db, String userId)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L115": {
+  "anchor": "private void sameOrigin(Context ctx)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L227": {
+  "anchor": "boolean ok = Passwords.verify(String.valueOf(b.get(\"password\")), hash) && !rows.isEmpty();"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L301": {
+  "anchor": "static String consumeTicket"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L304": {
+  "anchor": "DELETE FROM ws_tickets WHERE token_hash = ? AND expires_at > now() RETURNING user_id"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L330": {
+  "anchor": "private void createBoard(Context ctx)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L401": {
+  "anchor": "private void changeMember("
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L445": {
+  "anchor": "private void history(Context ctx)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Api.java#L474": {
+  "anchor": "private void bugReport(Context ctx)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L107": {
+  "anchor": "if (!bucket.take(clock.getAsLong()))"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L136": {
+  "anchor": "private static Map<String, Object> await("
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L215": {
+  "anchor": "void closeElsewhere()"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L29": {
+  "anchor": "static final double OPS_PER_SECOND = 20, BURST = 50;"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L64": {
+  "anchor": "private void drain()"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/ClientConn.java#L93": {
+  "anchor": "void onMessage(String text)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Fanout.java#L108": {
+  "anchor": "private void tick()"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Fanout.java#L119": {
+  "anchor": "router.forward(board, Msg.obj(\"k\", \"ENSURE\""
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Fanout.java#L89": {
+  "anchor": "private void deliver(String board, String message)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java#L111": {
+  "anchor": "app.wsBeforeUpgrade(\"/ws\""
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java#L158": {
+  "anchor": "public void close() {"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java#L80": {
+  "anchor": "app.get(\"/healthz\""
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/GatewayMain.java#L97": {
+  "anchor": "String csp ="
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Presence.java#L46": {
+  "anchor": "void update(String board, String connection, String user, String card, String state)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Presence.java#L86": {
+  "anchor": "void sweep(Iterable<String> boards)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Retention.java#L20": {
+  "anchor": "static final int DAYS = 35;"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Retention.java#L21": {
+  "anchor": "static final int BATCH = 5_000;"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Retention.java#L33": {
+  "anchor": "WHERE o.version <= k.oldest"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Router.java#L52": {
+  "anchor": "private CompletableFuture<Map<String, Object>> attempt("
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/Router.java#L76": {
+  "anchor": "String owner(String board)"
+ },
+ "server/gateway/src/main/java/dev/concord/gateway/TokenBucket.java#L21": {
+  "anchor": "synchronized boolean take(long nowMs)"
+ },
+ "server/session/src/main/java/dev/concord/session/Backup.java#L43": {
+  "anchor": "public final class Backup"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L107": {
+  "anchor": "protected boolean removeEldestEntry(Map.Entry<String, Long> e)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L136": {
+  "anchor": "Thread.ofVirtual().name(\"board-\""
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L160": {
+  "anchor": "public Offered offer(Item item)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L209": {
+  "anchor": "d.ownership().announce(id, fence);"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L226": {
+  "anchor": "private void serveOnce()"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L242": {
+  "anchor": "d.publisher().publish(id, Msg.encode(Msg.boardVersion(version)));"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L270": {
+  "anchor": "private void admit(Submit s)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L295": {
+  "anchor": "if (batch.isEmpty()) batchDeadline = d.clock().getAsLong() + d.batchMs();"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L304": {
+  "anchor": "private Map<String, Object> validate(Submit s, String opId)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L328": {
+  "anchor": "private void rejectOrAckStored"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L386": {
+  "anchor": "private void flush()"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L41": {
+  "anchor": "static final int LRU_SIZE = 10_000;"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L412": {
+  "anchor": "if (c.fenced())"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L42": {
+  "anchor": "static final long COMMIT_TIMEOUT_MS"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L44": {
+  "anchor": "static final int SNAPSHOT_EVERY_OPS"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L442": {
+  "anchor": "r.send(Msg.ack(opId, v))"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L453": {
+  "anchor": "private void rebalanceIfNeeded"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L49": {
+  "anchor": "static final int MAILBOX_LIMIT"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L498": {
+  "anchor": "private void applyCommitted"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L520": {
+  "anchor": "private void reconcile() throws"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L552": {
+  "anchor": "private void whileReconciling(Item item)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L602": {
+  "anchor": "private Map<String, Object> catchUpMessage(String type, Long since)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L652": {
+  "anchor": "private void unloadIfIdle()"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L685": {
+  "anchor": "private void dropDeleted(String how)"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L96": {
+  "anchor": "private final BlockingQueue<Item> mailbox"
+ },
+ "server/session/src/main/java/dev/concord/session/BoardActor.java#L98": {
+  "anchor": "private volatile State state = State.CLAIMING;"
+ },
+ "server/session/src/main/java/dev/concord/session/Boards.java#L33": {
+  "anchor": "public void dispatch(String board, BoardActor.Item item)"
+ },
+ "server/session/src/main/java/dev/concord/session/Boards.java#L85": {
+  "anchor": "private void renewAll()"
+ },
+ "server/session/src/main/java/dev/concord/session/InternalServer.java#L45": {
+  "anchor": "app.wsBeforeUpgrade(\"/internal\""
+ },
+ "server/session/src/main/java/dev/concord/session/Membership.java#L28": {
+  "anchor": "public String role(String board, String user)"
+ },
+ "server/session/src/main/java/dev/concord/session/Ownership.java#L125": {
+  "anchor": "public long renew(String board, long fence)"
+ },
+ "server/session/src/main/java/dev/concord/session/Ownership.java#L131": {
+  "anchor": "if (current == null || current != fence) return 0;"
+ },
+ "server/session/src/main/java/dev/concord/session/Ownership.java#L17": {
+  "anchor": "static final String FENCE"
+ },
+ "server/session/src/main/java/dev/concord/session/Ownership.java#L28": {
+  "anchor": "static final String RENEW"
+ },
+ "server/session/src/main/java/dev/concord/session/Ownership.java#L97": {
+  "anchor": "public long claim(String board)"
+ },
+ "server/session/src/main/java/dev/concord/session/Registry.java#L27": {
+  "anchor": "private void beat()"
+ },
+ "server/session/src/main/java/dev/concord/session/SessionMain.java#L63": {
+  "anchor": "private long subscribers(String board)"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L127": {
+  "anchor": "budget(c, deadlineMs); // a commit that would start after the deadline is not sent"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L134": {
+  "anchor": "protected void beforeCommit() throws SQLException {}"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L183": {
+  "anchor": "public Reconciled reconcile(String board, long applied)"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L218": {
+  "anchor": "public boolean raiseFence"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L220": {
+  "anchor": "UPDATE boards SET fence = ? WHERE id = ? AND fence < ?"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L232": {
+  "anchor": "public Loaded load(String board)"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L250": {
+  "anchor": "ALERT snapshot checksum mismatch"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L296": {
+  "anchor": "ORDER BY version DESC LIMIT 3"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L70": {
+  "anchor": "public Committed commit(String board, long fence, List<Pending> ops, long deadlineMs)"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L84": {
+  "anchor": "WHERE id = ? AND fence = ? RETURNING version"
+ },
+ "server/session/src/main/java/dev/concord/session/Store.java#L91": {
+  "anchor": "boolean deleted = !exists(c, board);"
+ },
+ "server/tools/guard_checks.py#L32": {
+  "anchor": "\"fence-check\": ("
+ },
+ "web/e2e/perf.spec.ts#L163": {
+  "anchor": "every update must render in under 16ms"
+ },
+ "web/src/BoardPage.tsx#L104": {
+  "anchor": "const DndArea = memo("
+ },
+ "web/src/BoardPage.tsx#L357": {
+  "anchor": "function useStableView(next: View)"
+ },
+ "web/src/useBoard.ts#L75": {
+  "anchor": "return useSyncExternalStore(subscribe, () => tick.n);"
+ }
+}
