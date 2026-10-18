@@ -45,6 +45,9 @@ So the condition could pass before every client was back (as it did locally: the
 
 ## Verification
 
+**A second flaw, found the same day.** CI on `14d8aa3` failed the corrected drill with 435 of 500 back and 65 "stuck" in status `joined`. Those 65 had rejoined 13s *before* the kill (a ticket failure during setup rotated them to gateway2), so the kill never touched them and "a JOINED after the kill from every client" could not hold. The condition is now: joined, and if a client lost its connection after the kill, a JOINED since. The drill logs how many the kill cut off. A laptop rerun: all 500 cut off, all back in **3.5s** with 0 failed attempts. So the time varies with how many clients' random rotation first tries the dead gateway: 3.5–16.2s on the laptop, 12.4s on CI.
+
+
 - The corrected drill passed on the laptop and on CI (numbers above).
 - `deploy/drills/run-all.sh` runs it on every push.
 - The 3.5s figure is struck out in `deploy/drills/results.txt`, with the reason.

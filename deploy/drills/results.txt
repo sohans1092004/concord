@@ -56,3 +56,13 @@ exit 0 at 2026-10-18T09:04:41Z
 command: deploy/drills/reconnect-storm.sh
 DRILL {"drill":"reconnect-storm","boards":50,"clients":500,"all_rejoined_after_ms":16202,"reconnect_failures":128,"acks":1447,"acked_missing_from_board_ops":0,"boards_converged":"50/50","restarts_before":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0},"restarts_after":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0}}
       Tests  1 passed | 6 skipped (7)
+
+# reconnect-storm, condition corrected again (2026-10-18, ~12:10 UTC): CI on 14d8aa3 failed with 435/500 "back" and
+# 65 stuck in status "joined": those 65 had rejoined 13s BEFORE the kill (a ticket failure in setup rotated them to
+# gateway2), so the kill never touched them and the "JOINED after the kill from every client" rule could not hold.
+# Now: joined, and if a client lost its connection after the kill, a JOINED since. The drill logs how many the kill
+# cut off. Time to all back varies with how many clients' random rotation first tries the dead gateway:
+# 16.2s with 128 failed attempts (run above), 3.5s with 0 (this run).
+command: deploy/drills/reconnect-storm.sh
+DRILL {"drill":"reconnect-storm","boards":50,"clients":500,"cut_off_by_the_kill":500,"all_rejoined_after_ms":3548,"reconnect_failures":0,"acks":550,"acked_missing_from_board_ops":0,"boards_converged":"50/50","restarts_before":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0},"restarts_after":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0}}
+      Tests  1 passed | 6 skipped (7)

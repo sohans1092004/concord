@@ -28,7 +28,7 @@ Every row of the §10.1 table, measured, with its command and raw output in [`ra
 | Offline merge, 24h | **Accelerated** | same | 5,701 edits synced in 283s; 0 lost, 0 unsent | **Met** (after amendment 31; **failed before it**) |
 | Owner crash | Kill the owner mid-load | Serving ≤5s after lease expiry; every ACKed op stored | 1,565ms after expiry; 0 missing | **Met** ([drills](../../deploy/drills/results.txt)) |
 | Stale owner | Pause the owner past its lease | Zero stale commits; clients recover | 0 stale commits; fence rejection when Redis is cut too | **Met** ([drills](../../deploy/drills/results.txt)) |
-| Reconnect storm | Gateway with 500 connections killed | No cascade; time to all reconnected | 16.2s (laptop), 12.4s (CI); nothing else restarted | **Met** ([drills](../../deploy/drills/results.txt), amendment 30) |
+| Reconnect storm | Gateway with 500 connections killed | No cascade; time to all reconnected | 3.5–16.2s (laptop, 2 runs), 12.4s (CI); nothing else restarted | **Met** ([drills](../../deploy/drills/results.txt), amendment 30) |
 | Per-connection throughput | One connection, one op in flight | (asked in Phase 4b) | 21.6 ops/s, ACK p50 47ms | Recorded: the 20 ops/s rate limit is the cap |
 | Recovery cost | Snapshot + 0 or 499-op tail, owner killed | (for ADR-008) | claim 29–342ms at 2,000 cards and a 942 KB snapshot | Recorded; [ADR-008](../../docs/adr/ADR-008-snapshot-every-500-ops-or-60s.md) |
 
@@ -168,7 +168,7 @@ These are the drills, rerun on the current code on 2026-10-18 ([`deploy/drills/r
 - **Stale owner:**
   - paused 20.5s: 0 commits by the stale owner;
   - with its Redis also cut: 1 fence rejection, rows 99 → 99, the probe op refused with `NOT_OWNER`.
-- **Reconnect storm:** 500 clients on 50 boards, gateway killed. All rejoined in **16.2s** on the laptop and **12.4s** on CI; 0 ACKed ops lost; 50/50 boards converged; no other service restarted. No rate limit was needed (amendment 30).
+- **Reconnect storm:** 500 clients on 50 boards, gateway killed. All rejoined in **3.5–16.2s** on the laptop (two runs; the spread is how many clients first retried the dead gateway: 0 vs 128 failed attempts) and **12.4s** on CI; 0 ACKed ops lost; 50/50 boards converged; no other service restarted. No rate limit was needed (amendment 30).
 
 ## 8. Per-connection throughput, one op in flight
 

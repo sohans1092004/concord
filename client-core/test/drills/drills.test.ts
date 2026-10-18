@@ -255,7 +255,13 @@ describe("drills", () => {
     const killedAt = Date.now();
     compose("kill", "-s", "SIGKILL", "gateway1");
     compose("start", "gateway1");
-    const rejoined = ({ x }: (typeof all)[number]) => x.c.status === "joined" && x.events.some((e) => e.event === "joined" && e.at > killedAt);
+    // A client may already be on gateway 2 (a failed first attempt rotates it there), and the kill
+    // never touches it. So: joined, and if it lost its connection after the kill, joined again since.
+    const lostAt = ({ x }: (typeof all)[number]) => x.events.find((e) => e.event === "reconnect_scheduled" && e.at > killedAt)?.at;
+    const rejoined = (a: (typeof all)[number]) => {
+      const lost = lostAt(a);
+      return a.x.c.status === "joined" && (lost === undefined || a.x.events.some((e) => e.event === "joined" && e.at > lost));
+    };
     const back = await waitFor(() => all.every(rejoined), 300_000, "every client rejoined").catch((e: Error) => {
       // Say why: how many are back, in which states the others are, and what they last did.
       const stuck = all.filter((a) => !rejoined(a));
@@ -283,6 +289,7 @@ describe("drills", () => {
     const ticketErrors = all.reduce((n, { x }) => n + x.events.filter((e) => e.event === "ticket_failed" || e.event === "connect_failed").length, 0);
     const result = {
       drill: "reconnect-storm", boards: BOARDS, clients: all.length,
+      cut_off_by_the_kill: all.filter((a) => lostAt(a) !== undefined).length,
       all_rejoined_after_ms: back.at - killedAt,
       reconnect_failures: ticketErrors,
       acks: all.reduce((n, { x }) => n + x.acked.size, 0),
