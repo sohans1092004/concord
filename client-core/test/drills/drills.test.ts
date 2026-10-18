@@ -2,7 +2,7 @@
 //   DRILL=kill-owner npx vitest run test/drills
 // or all of them with deploy/drills/run-all.sh. They leave the stack as they found it.
 import { describe, expect, it } from "vitest";
-import { compose, psql, redisCli, sleep } from "../e2e/stack.js";
+import { client, compose, docker, psql, redisCli, seed, sleep, storedOpIds } from "../e2e/stack.js";
 import { boardVersion, drill, metricsOf, ownerOf, redisRoute, waitFor } from "./drill.js";
 
 const only = process.env.DRILL;
@@ -222,4 +222,71 @@ describe("drills", () => {
       compose("start", back.value.instance);
     });
   });
+  /**
+   * §8 row 14, §10.1: a gateway holding 500 connections crashes and comes back. 50 boards × 10
+   * clients, all on gateway 1; one editor per board keeps editing. No other service may fail
+   * or restart, every client rejoins, nothing ACKed is lost and every board converges.
+   */
+  run("reconnect-storm")("reconnect-storm", async () => {
+    const BOARDS = 50;
+    const PER_BOARD = 10;
+    const boards = Array.from({ length: BOARDS }, () => seed(PER_BOARD - 1));
+    const all: { board: string; x: Awaited<ReturnType<typeof client>> }[] = [];
+    for (const b of boards) for (const u of b.users) all.push({ board: b.board, x: await client(b.board, u.session, 0) });
+    await Promise.all(all.map(({ x }) => x.c.until(() => x.c.status === "joined", 120_000)));
+    const restarts = () => Object.fromEntries(["gateway2", "session1", "session2", "session3", "postgres", "redis"].map((s) =>
+      [s, Number(docker("inspect", "-f", "{{.RestartCount}}", `deploy-${s}-1`).trim())]));
+    const restartsBefore = restarts();
+    const joins = () => all.reduce((n, { x }) => n + x.events.filter((e) => e.event === "joined").length, 0);
+
+    let editing = true;
+    const editors = boards.map(async (b, i) => {
+      const e = all[i * PER_BOARD]!.x.c;
+      e.addList("storm");
+      while (editing) {
+        const list = e.view().lists[0];
+        if (list && e.status === "joined") e.addCard(list.id, `card ${Date.now()}`);
+        await sleep(500);
+      }
+    });
+    await sleep(5_000);
+
+    const joinsBefore = joins();
+    const killedAt = Date.now();
+    compose("kill", "-s", "SIGKILL", "gateway1");
+    compose("start", "gateway1");
+    const back = await waitFor(() => all.every(({ x }) => x.c.status === "joined") && joins() >= joinsBefore + all.length, 300_000, "every client rejoined");
+    editing = false;
+    await Promise.all(editors);
+
+    // Settle and check each board: everything ACKed is stored, every client has one state.
+    const missing: string[] = [];
+    let converged = 0;
+    for (const b of boards) {
+      const mine = all.filter((a) => a.board === b.board).map((a) => a.x);
+      for (const x of mine) await x.c.settled(120_000);
+      const version = boardVersion(b.board);
+      for (const x of mine) await x.c.until(() => x.c.confirmedVersion === version, 60_000);
+      const stored = storedOpIds(b.board);
+      for (const x of mine) for (const id of x.acked.keys()) if (!stored.has(id)) missing.push(id);
+      if (new Set(await Promise.all(mine.map((x) => x.c.confirmedHash()))).size === 1) converged++;
+    }
+    const restartsAfter = restarts();
+    const ticketErrors = all.reduce((n, { x }) => n + x.events.filter((e) => e.event === "ticket_failed" || e.event === "connect_failed").length, 0);
+    const result = {
+      drill: "reconnect-storm", boards: BOARDS, clients: all.length,
+      all_rejoined_after_ms: back.at - killedAt,
+      reconnect_failures: ticketErrors,
+      acks: all.reduce((n, { x }) => n + x.acked.size, 0),
+      acked_missing_from_board_ops: missing.length,
+      boards_converged: `${converged}/${BOARDS}`,
+      restarts_before: restartsBefore, restarts_after: restartsAfter,
+    };
+    console.log(`DRILL ${JSON.stringify(result)}`);
+    for (const { x } of all) x.c.close();
+    expect(missing, "every ACKed op is in board_ops").toEqual([]);
+    expect(converged, "every board converges").toBe(BOARDS);
+    expect(restartsAfter, "no other service restarted").toEqual(restartsBefore);
+    for (const port of [7001, 7002, 7003, 8082]) expect((await fetch(`http://localhost:${port}/health`)).ok, `${port} healthy`).toBe(true);
+  }, 900_000);
 });

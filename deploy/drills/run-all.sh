@@ -11,7 +11,7 @@ docker compose -f "$root/deploy/docker-compose.yml" up -d --build
 for port in 7001 7002 7003 8081 8082; do  # toxiproxy (8474) starts first: sessions depend on it
   until curl -fs "localhost:$port/health" >/dev/null; do sleep 1; done
 done
-for d in kill-owner pause-owner pause-owner-no-redis stop-postgres stop-redis wipe-redis; do
+for d in kill-owner pause-owner pause-owner-no-redis stop-postgres stop-redis wipe-redis reconnect-storm; do
   echo "== $d"
   "$here/$d.sh"
 done

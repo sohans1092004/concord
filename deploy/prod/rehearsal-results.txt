@@ -161,3 +161,16 @@ live check during it (laptop in India, 04:47:21-04:52:35 UTC): SMOKE_LIVE_SECOND
 LIVE {"url":"https://concord-serve.duckdns.org","seconds":300,"submitted":2314,"acked":2315,"board_version":2315,"history":2315,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
 after: the check's account deletion deleted its loaded board: session logs (15 min) ERROR count 0; "board deleted (announced): dropped" once
 result: passed, 0 ACKed ops missing, 0 Unsent edits; amendment 27 works on the live host
+
+## Second trial deploy on the real host: op retention + observability (2026-10-18)
+command (VM): deploy/prod/deploy.sh eca3941f0039d0ea7b79827a67c54acd186a719e, from 1000c46b67e8;
+backup 08:36:24-08:36:36 (20,680 bytes; 0 users/boards/ops: no trial users yet, the smoke check deletes its own);
+migrate: schema version 2 already applied; session1, session2, gateway replaced and healthy; done 08:37:47 UTC;
+public /healthz ok; rollback printed: deploy.sh 1000c46b67e8...
+found after it (laptop, 08:4x UTC): curl https://concord-serve.duckdns.org/metrics -> 200 (115 B),
+  /metrics/prometheus -> 200 (237 B): still public. Caddy was "Up 5 hours": the VM's checkout still had the
+  old Caddyfile (the deploy command given omitted the runbook's git pull), and compose does not restart
+  Caddy when a mounted file changes, so it would not have reloaded anyway.
+fix: 41b6b9a, deploy.sh refuses unless the checkout is at the deployed SHA, always reloads Caddy's
+  Caddyfile (graceful), and checks /metrics/prometheus answers 404 from outside.
+smoke test: pending (needs the invite code; to run during the 41b6b9a deploy)

@@ -19,3 +19,29 @@ DRILL {"drill":"wipe-redis","board":"78127731-f327-4956-9f4b-a883b86d71dd","clie
       Tests  1 passed | 5 skipped (6)
 all drills passed
 exit 0 at 2026-10-16T22:20:46Z
+
+# Rerun against the current code (amendments 13, 26-29 since the run above), plus the reconnect-storm drill (§8 row 14)
+command: deploy/drills/run-all.sh   started 2026-10-18T08:56:45Z at commit 41b6b9a + the reconnect-storm drill (uncommitted)
+== kill-owner
+DRILL {"drill":"kill-owner","board":"f1e5be8b-db4c-4057-9d21-9df175180c7d","clients":4,"killed":"session2","new_owner":"session1","fence":"1 -> 2","lease_remaining_at_kill_ms":12313,"new_owner_serving_after_lease_expiry_ms":1565,"first_ack_after_kill_ms":13979,"duration_s":27.7,"ops_submitted":346,"acks":347,"board_version":347,"rows_in_board_ops":347,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"2b123e6869305fea66be5c59338b0755356700e4d31bbc6a60956c5c506c39b3"}
+      Tests  1 passed | 6 skipped (7)
+== pause-owner
+DRILL {"drill":"pause-owner","board":"112d92a2-5811-4770-af18-fec83870c0bb","clients":4,"paused":"session2","paused_for_ms":20532,"new_owner":"session1","fence":"1 -> 2","new_owner_after_pause_ms":16357,"commits_by_stale_owner_after_pause":0,"stale_owner_fence_rejections":0,"duration_s":44.9,"ops_submitted":694,"acks":695,"board_version":695,"rows_in_board_ops":695,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"ad042dc571221fb89daf548eff2dde59956fe9d9214bea847ed4f9b4fb4bb69c"}
+      Tests  1 passed | 6 skipped (7)
+== pause-owner-no-redis
+DRILL {"drill":"pause-owner-no-redis","board":"1ca153c3-fc59-4005-84ff-58be1c389340","clients":4,"paused":"session3","new_owner":"session1 after 16589 ms","fence":"1 -> 2","stale_owner_fence_rejections":1,"stale_owner_lease_renew_failures":1,"stale_owner_rows_at_pause_and_after":"99 -> 99","fenced_out_log_lines":1,"commits_by_stale_owner_after_pause":0,"probe_reply":"ERROR NOT_OWNER","probe_stored":0,"duration_s":46.2,"ops_submitted":677,"acks":678,"board_version":678,"rows_in_board_ops":678,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"f45a97a1d8caf8ab2f6a444d01c38f2b0638196f354dac547ef43751bdf3fbf1"}
+      Tests  1 passed | 6 skipped (7)
+== stop-postgres
+DRILL {"drill":"stop-postgres","board":"388e6e5f-55e4-4b01-9fe2-3d8ba855a4f7","clients":4,"postgres_down_ms":10582,"acks_while_down":0,"pending_peak_per_client":49,"first_ack_after_postgres_start_ms":7760,"duration_s":47.5,"ops_submitted":619,"acks":620,"board_version":620,"rows_in_board_ops":620,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"7036083895d3578bbd4c9ddce0b839162823cb0f7fdeda97cb7a2eedbf38d352"}
+      Tests  1 passed | 6 skipped (7)
+== stop-redis
+DRILL {"drill":"stop-redis","board":"02d21f85-c8c5-4fca-bbda-75fffe6af2cb","clients":4,"redis_down_ms":15779,"acks_while_down":268,"versions_committed_while_down":288,"client_lag_in_versions_at_end_of_outage":[13,4,13,3],"duration_s":32.6,"ops_submitted":580,"acks":581,"board_version":581,"rows_in_board_ops":581,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"45395e3828e5727784f300a03bfe1ae1812aaaac390ef8d421194010179232bf"}
+      Tests  1 passed | 6 skipped (7)
+== wipe-redis
+DRILL {"drill":"wipe-redis","board":"ac26e1ac-85e2-4009-b378-4a3cccf245f8","clients":4,"owner_before":"session1 fence 1","owner_after":"session1 fence 1","owner_key_back_after_ms":4309,"boards_fence":"1 -> 1","boards_fence_before_forced_claim":1,"claimed_after_wipe":"session2 fence 2","fence_counter_after_claim":"2","claim_fence_retries":0,"duration_s":39.1,"ops_submitted":498,"acks":499,"board_version":499,"rows_in_board_ops":499,"acked_missing_from_board_ops":0,"unsent_edits":0,"unsent_detail":[],"clients_converged":true,"state_sha256":"778a107e738f7a42eee1370869669c5bd4ffd4131bc5b7aab4967570efa961ae"}
+      Tests  1 passed | 6 skipped (7)
+== reconnect-storm
+DRILL {"drill":"reconnect-storm","boards":50,"clients":500,"all_rejoined_after_ms":3542,"reconnect_failures":0,"acks":593,"acked_missing_from_board_ops":0,"boards_converged":"50/50","restarts_before":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0},"restarts_after":{"gateway2":0,"session1":0,"session2":0,"session3":0,"postgres":0,"redis":0}}
+      Tests  1 passed | 6 skipped (7)
+all drills passed
+exit 0 at 2026-10-18T09:04:41Z
