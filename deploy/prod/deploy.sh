@@ -2,7 +2,7 @@
 # Deploy a published version, or roll back to one, without losing an edit (Phase 4a step 6):
 #   cd ~/concord && git fetch && git checkout --detach <full commit SHA> && deploy/prod/deploy.sh <full commit SHA>
 # CI published that commit's images (ci.yml, "publish"). Nothing is built here: the VM only pulls.
-# The deploy files (compose.yaml, Caddyfile, summary.sh) come from this checkout, so it must be at
+# The deploy files (compose.yaml, caddy/Caddyfile, summary.sh) come from this checkout, so it must be at
 # the same commit as the images; the script refuses otherwise.
 #
 # 1. Take a backup now, with the running version, and stop if it fails.
@@ -17,7 +17,7 @@
 # 5. Replace the gateway: on SIGTERM it sends RECONNECT_ELSEWHERE to every client, which
 #    reconnects (with backoff) to the new one and resends its queue (SPEC §8 row 15).
 # 6. The rest (the backup job; Caddy only if its compose config changed), then reload Caddy's
-#    Caddyfile: it is a mounted file, whose changes compose does not see. A reload is graceful.
+#    caddy/Caddyfile: compose does not see changes to a mounted file. A reload is graceful.
 # 7. Check from outside: /healthz answers, /metrics does not (it is for inside the network only).
 # Rollback is the same command with the previous SHA, which this script prints at the end.
 set -euo pipefail

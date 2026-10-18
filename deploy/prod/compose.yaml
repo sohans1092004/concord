@@ -142,7 +142,9 @@ services:
       CADDY_SITE: ${CONCORD_DOMAIN} # the rehearsal sets ":80": the tunnel does the TLS
       ACME_EMAIL: ${ACME_EMAIL:?run gen-env.sh}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: a single-file bind mount pins the file's inode, so after
+      # git checkout replaced the Caddyfile, Caddy went on reading the old one, reload or not.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

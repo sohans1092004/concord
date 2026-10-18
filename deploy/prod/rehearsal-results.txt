@@ -173,4 +173,23 @@ found after it (laptop, 08:4x UTC): curl https://concord-serve.duckdns.org/metri
   Caddy when a mounted file changes, so it would not have reloaded anyway.
 fix: 41b6b9a, deploy.sh refuses unless the checkout is at the deployed SHA, always reloads Caddy's
   Caddyfile (graceful), and checks /metrics/prometheus answers 404 from outside.
-smoke test: pending (needs the invite code; to run during the 41b6b9a deploy)
+a first attempt at 41b6b9a (09:03 UTC) stopped at the pull, before changing anything: its images were
+  not published yet (the script stops before .env names the new tag; still running eca3941).
+
+## Third trial deploy: 41b6b9a (deploy.sh checks; 2026-10-18)
+command (VM): git fetch && git checkout --detach 41b6b9a35e4e... && deploy/prod/deploy.sh 41b6b9a35e4e3f7152afdef69c1c27e4daff655f
+backup 09:09:48-09:10:00 (1 user, 1 board, 249 ops); schema version 2 already applied; session1, session2,
+gateway replaced and healthy; caddy reload ran; done 09:11:12 UTC; public /healthz ok;
+deploy.sh's new check: "WARNING: public /metrics/prometheus answered 200, expected 404"
+live check during it (laptop in India, from 09:08:43 UTC):
+  SMOKE_URL=https://concord-serve.duckdns.org SMOKE_INVITE=<code> SMOKE_LIVE_SECONDS=300 npx vitest run test/smoke
+smoke: https://concord-serve.duckdns.org, board version 51, both on 258dd2d316dd..., 9276ms
+latency: edit on one client until the other shows it, n=30: p50 312 ms, p95 315 ms, max 317 ms; target 200 ms: missed at p95
+LIVE {"url":"https://concord-serve.duckdns.org","seconds":300,"submitted":2305,"acked":2306,"board_version":2306,"history":2306,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+Tests 2 passed (2)
+result: deploy passed, 0 ACKed ops missing, 0 Unsent edits; /metrics still public
+why: the response carried Caddy's headers (HSTS, Alt-Svc) and the gateway's body, and this Caddyfile
+  adapts (caddy adapt, 2.8.4) to the 404 route before reverse_proxy. So Caddy reloaded an old file:
+  compose mounted ./Caddyfile as a single file, which pins its inode; git checkout replaced the file,
+  and the container kept seeing the old one.
+fix: mount the directory deploy/prod/caddy (caddy/Caddyfile) instead of the file.
