@@ -127,3 +127,29 @@ result: deploy A->B and rollback B->A both passed: 0 ACKed ops missing, 0 Unsent
   stdin into a private file in the throwaway container. Reproduced on the rehearsal stack with a
   root-owned 600 key: old script failed (there: "/identity: is a directory", the mount of that path
   failed), new script: RESTORE VERIFIED.
+
+## Rehearsal of the first trial deploy, amendment 27 (2026-10-18, laptop, production compose via a quick tunnel)
+from d9404706919e13f87c978a6742d442fed69145cb (what the VM runs) to 1000c46b67e8e40b1f30f17ff5386db0141aae05, and back; 3 clients editing for 240s through the tunnel each leg
+##### deploy to 1000c46b67e8 (running d9404706919e) at 04:36:27
+== 04:36:58 backup before deploying (running version d9404706919e)
+== 04:37:01 pull 1000c46b67e8
+== 04:37:27 migrate (forward-only)
+== 04:37:36 replace session1
+== 04:37:53 replace session2
+== 04:38:10 replace gateway
+== 04:38:22 the rest (backup; caddy and redis only if their config changed)
+== 04:38:30 done: running 1000c46b67e8
+deploy.sh exit 0
+LIVE {"url":"https://throughout-laid-advance-saver.trycloudflare.com","seconds":240,"submitted":1833,"acked":1834,"board_version":1834,"history":1834,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+##### rollback to d9404706919e (running 1000c46b67e8) at 04:40:43
+== 04:41:13 backup before deploying (running version 1000c46b67e8)
+== 04:41:14 pull d9404706919e
+== 04:41:18 migrate (forward-only)
+== 04:41:20 replace session1
+== 04:41:37 replace session2
+== 04:41:54 replace gateway
+== 04:42:06 the rest (backup; caddy and redis only if their config changed)
+== 04:42:14 done: running d9404706919e
+deploy.sh exit 0
+LIVE {"url":"https://throughout-laid-advance-saver.trycloudflare.com","seconds":240,"submitted":1853,"acked":1854,"board_version":1854,"history":1854,"acked_missing":0,"unsent":0,"unsent_detail":[],"rejoins":3,"converged":true}
+result: deploy and rollback both passed: 0 ACKed ops missing, 0 Unsent edits, converged
