@@ -29,6 +29,8 @@ surprises you.
   everything deleted, with **Restore**. Cards whose list was deleted wait in **Orphaned**
   until the list is restored or you drag them out.
 - **History** shows who changed what in the last 30 days.
+- Your own edits appear instantly. Other people's appear about a third of a second later,
+  because the server is in Sydney. That's expected, not a bug.
 - The round initials at the top are the people looking at the board right now; an eye on a
   card shows who has it open.
 

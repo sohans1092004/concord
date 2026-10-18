@@ -14,7 +14,10 @@ echo "-- memory and CPU now"
 docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}'
 for s in gateway session1 session2; do
   printf '%-9s heap: ' "$s"
-  docker compose exec -T "$s" jcmd 1 GC.heap_info 2>/dev/null | grep -o 'total [0-9]*K, used [0-9]*K' || echo "?"
+  docker compose exec -T "$s" jcmd 1 GC.heap_info 2>/dev/null \
+    | sed -nE 's/^ *(def new generation|tenured generation|garbage-first heap) +total ([0-9]+K), used ([0-9]+K).*/\1: total \2, used \3/p' \
+    | sed -e 's/^def new generation/young/' -e 's/^tenured generation/old/' -e 's/^garbage-first heap/heap/' \
+    | paste -sd ';' - | sed 's/;/;  /g' || echo "?"
 done
 free -m | sed -n 1,2p
 
