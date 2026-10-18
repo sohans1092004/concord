@@ -141,6 +141,9 @@ export const JOIN_TIMEOUT_MS = 10_000;
  * closing the socket (a dropped Wi-Fi, a laptop lid), which no WebSocket event reports.
  */
 export const SILENCE_MS = 15_000;
+/** The gateway's per-connection limit on OP frames (§9.4); the client paces itself to it. */
+export const SEND_PER_SECOND = 20;
+export const SEND_BURST = 50;
 
 /** SPEC §7.3 step 1: 0.5s × 2^attempt, capped at 30s, full jitter. */
 export function backoffMs(attempt: number, random: () => number): number {
@@ -169,6 +172,11 @@ export class SyncClient {
   private joinTimer: ReturnType<typeof setTimeout> | null = null;
   private resendTimer: ReturnType<typeof setTimeout> | null = null;
   private resendAttempt = 0;
+  private outbox: Op[] = []; // to send, in order, as the token bucket allows
+  private readonly outboxIds = new Set<string>();
+  private pumpTimer: ReturnType<typeof setTimeout> | null = null;
+  private tokens = SEND_BURST;
+  private tokensAt = 0;
   /** Ops refused as INVALID_OP while an earlier op of ours was unacknowledged. */
   private readonly deferred = new Set<string>();
   private syncInFlight = false;
@@ -549,6 +557,7 @@ export class SyncClient {
     this.syncInFlight = false;
     if (this.resendTimer) clearTimeout(this.resendTimer);
     this.resendTimer = null;
+    this.clearOutbox();
     this.deferred.clear(); // JOINED resends the whole queue in order
     if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.presenceTimer = null;
@@ -568,8 +577,49 @@ export class SyncClient {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(m));
   }
 
+  /**
+   * Queues `op` to send, in call order, paced to the gateway's limit (§9.4: 20 ops/s, burst 50),
+   * so a long offline queue drains at that rate instead of being refused frame by frame.
+   */
   private sendOp(op: Op): void {
     if (this.status_ !== "joined") return;
+    if (!this.outboxIds.has(op.op_id)) {
+      this.outbox.push(op);
+      this.outboxIds.add(op.op_id);
+    }
+    this.pump();
+  }
+
+  /** Sends what the token bucket allows now; wakes itself when the next token is due. */
+  private pump(): void {
+    if (this.pumpTimer) return;
+    const now = performance.now(); // real time, as the gateway's bucket runs on
+    this.tokens = Math.min(SEND_BURST, this.tokens + ((now - this.tokensAt) * SEND_PER_SECOND) / 1000);
+    this.tokensAt = now;
+    while (this.outbox.length > 0 && this.tokens >= 1 && this.status_ === "joined") {
+      const op = this.outbox.shift()!;
+      this.outboxIds.delete(op.op_id);
+      this.tokens -= 1;
+      this.transmit(op);
+    }
+    if (this.outbox.length > 0 && this.status_ === "joined") {
+      const wait = Math.max(1, Math.ceil(((1 - this.tokens) * 1000) / SEND_PER_SECOND));
+      this.pumpTimer = setTimeout(() => {
+        this.pumpTimer = null;
+        this.pump();
+      }, wait);
+    }
+  }
+
+  /** Drops whatever was waiting to be sent (the connection is gone, or the queue is resent). */
+  private clearOutbox(): void {
+    this.outbox = [];
+    this.outboxIds.clear();
+    if (this.pumpTimer) clearTimeout(this.pumpTimer);
+    this.pumpTimer = null;
+  }
+
+  private transmit(op: Op): void {
     this.send({ type: "OP", op });
     const made = this.madeAt.get(op.op_id);
     if (made !== undefined) { // the first send only: the edit's root span
@@ -620,7 +670,11 @@ export class SyncClient {
         if (this.joinTimer) clearTimeout(this.joinTimer);
         this.joinTimer = null;
         this.log("joined", { version: this.version, pending: this.pending.length });
-        for (const op of this.pending) this.send({ type: "OP", op }); // step 5: resend the queue
+        // step 5: resend the queue, paced; a new connection starts with the gateway's full bucket
+        this.clearOutbox();
+        this.tokens = SEND_BURST;
+        this.tokensAt = performance.now();
+        for (const op of this.pending) this.sendOp(op);
         this.sendPresence();
         if (this.silenceTimer) clearInterval(this.silenceTimer);
         this.silenceTimer = setInterval(() => {
@@ -821,6 +875,7 @@ export class SyncClient {
     this.resendTimer = setTimeout(() => {
       this.resendTimer = null;
       this.deferred.clear();
+      this.clearOutbox();
       for (const op of this.pending) this.sendOp(op);
     }, backoffMs(this.resendAttempt++, this.random));
   }
@@ -1010,6 +1065,7 @@ export class SyncClient {
     if (this.syncTimer) clearTimeout(this.syncTimer);
     if (this.resendTimer) clearTimeout(this.resendTimer);
     this.resendTimer = null;
+    this.clearOutbox();
   }
 
   private log(event: string, data: Record<string, unknown>): void {

@@ -37,7 +37,8 @@ Rendering a list is "live cards whose placement names this list, sorted by
 - No merge can mix one writer's list with another writer's position. Concurrent moves of
   one card resolve to exactly one writer's choice (vectors 005, 006, 029, 030).
 - The losing client sees its move undone. SPEC §3.5 requires a visible "moved by {name}"
-  transition rather than a silent jump; that is Phase 3 UI work.
+  transition rather than a silent jump; Phase 3 built it (`client-core` keeps each lost move
+  for `MOVED_BY_MS`, 4s, and the web app shows the name of whoever moved the card).
 - A placement can name a list that is deleted or not yet seen on this replica. That case is
   defined by the Orphaned rule (ADR-003, SPEC §3.6), and a card given a list-form placement
   also lands in Orphaned (vector 032).

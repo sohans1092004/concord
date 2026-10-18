@@ -1,7 +1,7 @@
 // client-core against a scripted fake gateway: every §7 path without a network.
 import { Board, hlc as H, op as O, type Op } from "@concord/crdt";
 import { describe, expect, it, vi } from "vitest";
-import { backoffMs, JOIN_TIMEOUT_MS, MemoryStorage, SyncClient, type Socket } from "../../src/index.js";
+import { backoffMs, JOIN_TIMEOUT_MS, MemoryStorage, SEND_BURST, SEND_PER_SECOND, SyncClient, type Socket } from "../../src/index.js";
 
 const BOARD = "b0a4d000-0000-4000-8000-000000000001";
 const T0 = 1_760_000_000_000;
@@ -148,6 +148,27 @@ describe("client-core", () => {
     expect(O.checkClock(second, T0).ok).toBe(true);
     expect(second.replica_id).not.toBe(first.replica_id); // a fresh replica: HLCs never go back
     expect(client.pendingOps()).toHaveLength(1);
+  });
+
+  it("a long offline queue is sent at the gateway's pace, and RETRY_LATER does not re-flood it", async () => {
+    const { client, ws, join } = await setup();
+    const list = client.addList("offline");
+    for (let i = 0; i < 199; i++) client.addCard(list, `card ${i}`); // 200 ops queued while offline
+    await tick();
+    join();
+    const sent = () => ws().ofType("OP").length;
+    expect(sent(), "the burst goes out at once, no more").toBe(SEND_BURST);
+    await new Promise((r) => setTimeout(r, 1_000));
+    const afterOneSecond = sent();
+    expect(afterOneSecond).toBeGreaterThanOrEqual(SEND_BURST + SEND_PER_SECOND - 2);
+    expect(afterOneSecond).toBeLessThanOrEqual(SEND_BURST + SEND_PER_SECOND + 2);
+    // The gateway refuses one: the queue is resent from the start, still paced.
+    const first = ws().ofType("OP")[0]!.op as Op;
+    ws().push({ type: "ERROR", code: "RETRY_LATER", op_id: first.op_id, detail: "rate limited" });
+    await tick();
+    expect(sent() - afterOneSecond, "no burst beyond what the bucket holds").toBeLessThanOrEqual(2);
+    expect(client.pendingOps()).toHaveLength(200);
+    client.close();
   });
 
   it("RETRY_LATER and UNAVAILABLE keep the op and resend it", async () => {

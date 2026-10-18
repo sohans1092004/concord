@@ -1,0 +1,18 @@
+command: (cd client-core && LOAD=batching CONCORD_BATCH_MS=5 npx vitest run test/load)
+commit: d9f91b3
+started: 2026-10-18T10:00:35Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > batching
+LOAD {"test":"batching","batch_ms":5,"editors":30,"seconds":60,"samples":51852,"p50":25,"p95":44,"p99":95,"max":459,"committed_ops_per_s":29.8,"commits_per_s":14.2,"ops_per_commit":2.09}
+
+ ✓ test/load/load.test.ts (6 tests | 5 skipped) 75323ms
+   ✓ §10.1 measurements > batching  75313ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 5 skipped (6)
+   Start at  15:30:41
+   Duration  77.31s (transform 485ms, setup 0ms, collect 659ms, tests 75.32s, environment 1ms, prepare 424ms)
+
+ended: 2026-10-18T10:01:58Z

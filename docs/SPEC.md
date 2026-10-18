@@ -729,7 +729,10 @@ on screen loses nothing (`offline.spec.ts`, guard check `append-before-view`).
    more than 2,000 ops behind or behind the oldest kept op.
 4. Merge them into the confirmed replica. A snapshot replaces the confirmed replica; the
    pending queue is untouched.
-5. Resend the whole pending queue. The server dedups by `op_id`.
+5. Resend the whole pending queue, in order, paced to the gateway's per-connection limit
+   (20 ops/s, burst 50, §9.4) by a token bucket of the same shape, so a long offline queue
+   drains at that rate instead of being refused frame by frame (amendment 31). The server
+   dedups by `op_id`.
 6. Remove each op from the queue on its ACK.
 
 Ops arrive from the server in version order, and the owner checks references before
@@ -1172,3 +1175,4 @@ section text itself is updated in the same commit.
 | 28 | 2026-10-18 | §5.1, §9.6 | Op retention bounded by the oldest of the three kept snapshots, not the latest: with the latest, a corrupt newest snapshot would fall back (§8 row 13) to an older one whose tail had been deleted. Runs daily in the gateway, in batches. The backup manifest's independent replay starts from the oldest kept snapshot that passes its checksum (from version 0 when nothing was pruned), instead of from version 1 (`RetentionTest`; guard checks `retention-below-snapshot`, `retention-oldest-snapshot`). |
 | 29 | 2026-10-18 | §9.5 | Observability as built: Prometheus metrics on every service, `POST /api/telemetry` (bounded, rate-limited) for client-reported sync latency and client spans, OpenTelemetry traces keyed by `op_id` (off unless `CONCORD_OTLP_ENDPOINT` is set), the §9.5 alert rules and a Grafana dashboard under `--profile observability`; `/metrics*` not served through Caddy (it had been public on the trial host) (`PromTest`, `ApiTest.telemetryIsBoundedAndRateLimited`, `test/e2e/trace.test.ts`; guard checks `telemetry-size`, `telemetry-rate`, `telemetry-client-cap`, `trace-op-id`). |
 | 30 | 2026-10-18 | §8 row 14 | The per-gateway connection-rate limit is dropped; it was never built and the SPEC gave it no number. The reconnect-storm drill (500 clients on 50 boards, their gateway killed with SIGKILL and restarted, no limit) found no cascade: all rejoined in 16.2s on the laptop and 12.4s on CI, 0 ACKed ops lost, 50/50 boards converged, no other service restarted (`deploy/drills/results.txt`). Client jitter alone spread the load. Revisit if a gateway ever holds far more than 500 connections. |
+| 31 | 2026-10-18 | §7.3 | The client paces every op it sends to the gateway's per-connection limit (20 ops/s, burst 50) with a token bucket of the same shape, reset to full on each new connection, on real time; a `RETRY_LATER` resends the queue from the start through the same pacer. Found by the §10.1 offline measurement: the client sent its whole queue at once, the gateway refused all but the burst, and every refusal re-sent the whole queue, so a 1,885-op queue (8 hours offline, accelerated) took 487s to drain and a 5,760-op one (24 hours) still had 5,243 pending after 10 minutes. Nothing was lost (unit test "a long offline queue is sent at the gateway's pace", guard check `client-send-pacing`). |

@@ -1,0 +1,18 @@
+command: (cd client-core && LOAD=offline OFFLINE_HOURS=8 npx vitest run test/load)
+commit: d9f91b3 + uncommitted changes
+started: 2026-10-18T10:05:43Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > offline
+LOAD {"test":"offline","accelerated":true,"simulated_hours":8,"real_seconds":48,"edits_offline_B":1885,"pending_B_at_reconnect":1885,"edits_online_A":939,"B_stamps_from":"2026-10-18T02:06:04.079Z","B_stamps_to":"2026-10-18T10:05:49.080Z","online_to_joined_ms":20078,"joined_to_all_acked_ms":487098,"board_version":2845,"converged":true,"acked_missing":0,"unsent":0}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 557238ms
+   ✓ §10.1 measurements > offline  557233ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  15:35:46
+   Duration  558.51s (transform 349ms, setup 0ms, collect 500ms, tests 557.24s, environment 1ms, prepare 289ms)
+
+ended: 2026-10-18T10:15:05Z

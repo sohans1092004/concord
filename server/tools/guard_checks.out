@@ -128,3 +128,5 @@ trace-op-id: removed keying the owner's commit span by the op's op_id, so it joi
   test trace:test/e2e/trace.test.ts: FAILED without the guard (AssertionError: trace 9c5c5ff9c6e44e48bdb067eec69bc011: expected [ 'client.send', ...(5) ] to deeply equal [ 'client.send', ...(6) ]); PASSED with it restored
 telemetry-client-cap: removed sending the client's telemetry report before two new items would push it over 100 (SPEC 9.5)
   test vitest:test/unit/features.test.ts: FAILED without the guard (AssertionError: expected false to be true // Object.is equality); PASSED with it restored
+client-send-pacing: removed pacing the client's sends to the gateway's 20 ops/s, burst 50 (SPEC 7.3, amendment 31)
+  test vitest:test/unit/client.test.ts: FAILED without the guard (AssertionError: the burst goes out at once, no more: expected 200 to be 50 // Object.is equality); PASSED with it restored

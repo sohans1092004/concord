@@ -122,6 +122,11 @@ CHECKS = {
         "rate-limiting telemetry reports to one per 10s per user (SPEC 9.5)",
         [(API, "        if (!allowed(\"telemetry:\" + u.id(), 0.1, 2)) {\n", "        if (false) {\n")],
         "dev.concord.gateway.ApiTest.telemetryIsBoundedAndRateLimited", True),
+    "client-send-pacing": (
+        "pacing the client's sends to the gateway's 20 ops/s, burst 50 (SPEC 7.3, amendment 31)",
+        [(CLIENT, "while (this.outbox.length > 0 && this.tokens >= 1 && this.status_ === \"joined\") {",
+          "while (this.outbox.length > 0 && this.status_ === \"joined\") {")],
+        "vitest:test/unit/client.test.ts", True),
     "telemetry-client-cap": (
         "sending the client's telemetry report before two new items would push it over 100 (SPEC 9.5)",
         [(CLIENT, "+ (span ? 1 : 0) > TELEMETRY_MAX) this.flushTelemetry();", "+ (span ? 1 : 0) > TELEMETRY_MAX) void 0;")],

@@ -1,0 +1,37 @@
+command: (cd client-core && LOAD=offline OFFLINE_HOURS=24 npx vitest run test/load)
+commit: d9f91b3 + uncommitted changes
+started: 2026-10-18T10:15:05Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+ ❯ test/load/load.test.ts (7 tests | 1 failed | 6 skipped) 753444ms
+   ↓ §10.1 measurements > baseline
+   ↓ §10.1 measurements > editors
+   ↓ §10.1 measurements > batching
+   ↓ §10.1 measurements > many-boards
+   ↓ §10.1 measurements > inflight
+   × §10.1 measurements > offline 753441ms
+     → client-core: condition not met within 600000ms (status joined, version 3375, pending 5243)
+   ↓ §10.1 measurements > recovery
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/load/load.test.ts > §10.1 measurements > offline
+Error: client-core: condition not met within 600000ms (status joined, version 3375, pending 5243)
+ ❯ Timeout._onTimeout src/client.ts:1025:16
+    1023|       const timer = setTimeout(() => {
+    1024|         off();
+    1025|         reject(new Error(`client-core: condition not met within ${ms}m…
+       |                ^
+    1026|       }, ms);
+    1027|       const off = this.onChange(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  15:45:09
+   Duration  755.10s (transform 422ms, setup 0ms, collect 576ms, tests 753.44s, environment 0ms, prepare 262ms)
+
+ended: 2026-10-18T10:27:45Z

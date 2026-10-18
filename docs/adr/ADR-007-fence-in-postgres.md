@@ -44,3 +44,10 @@ Safety rests on the database that stores the ops.
   drill: after `FLUSHALL`, the next claim got `boards.fence + 1` from the rebuilt counter.
 - The stop-redis drill kept ACKing (264 ACKs in 15.7s) with Redis down.
 - Correctness of ownership no longer depends on Redis at all, only liveness does.
+- The same rule settles the one case Redis cannot (amendment 13): a renewal that finds its
+  lease gone, as after a wipe, re-takes it only while `boards.fence` still equals its own
+  fence. Otherwise a stale owner would take the board's routing back from the real one
+  (`FencingTest.staleOwnerDoesNotRetakeAWipedLease`; incident report 014).
+- The fence alone is proven end to end by the pause-owner-no-redis drill (amendment 11): the
+  stale owner cannot reach Redis, so only Postgres stops it. Every run: one fence rejection,
+  zero commits; the guard check `fence-check-e2e` fails the drill without the fence condition.

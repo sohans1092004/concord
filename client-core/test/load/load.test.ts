@@ -401,5 +401,83 @@ describe("§10.1 measurements", () => {
     expect(check.converged && check.acked_missing === 0 && check.unsent === 0).toBe(true);
   }, 3_600_000);
 
+  /**
+   * Recovery cost (ADR-008): a board of RECOVERY_CARDS cards whose newest snapshot is 0 or 499
+   * ops behind (§5.1 snapshots every 500 ops or 60s), owner killed, then the new owner's own
+   * claim time (fence, lease, Postgres fence, snapshot + tail, announce) from its claim_ms.
+   */
+  run("recovery")("recovery", async () => {
+    const histogram = async (port: number, name: string) => {
+      const text = await (await fetch(`http://localhost:${port}/metrics/prometheus`)).text();
+      const v = (suffix: string) => Number(text.split("\n").find((l) => l.startsWith(`concord_session_${name}_${suffix} `))?.split(" ")[1] ?? 0);
+      return { sum: v("sum"), count: v("count") };
+    };
+    const ownerOf = (b: string) => JSON.parse(psqlRedis(b)) as { instance: string };
+    const psqlRedis = (b: string) => compose("exec", "-T", "redis", "redis-cli", "GET", `board:owner:${b}`).trim();
+    for (const cards of [10, 2_000]) {
+      for (const tail of [0, 499]) {
+        const writers = 5;
+        const seeded = seed(writers - 1);
+        const cs: Client[] = [];
+        for (let i = 0; i < writers; i++) cs.push((await client(seeded.board, seeded.users[i]!.session, i % 2)).c);
+        for (const c of cs) await c.until(() => c.status === "joined", 60_000);
+        const list = cs[0]!.addList("recovery");
+        await cs[0]!.settled(60_000);
+        for (const c of cs) await c.until(() => c.view().lists.length === 1, 60_000);
+        await Promise.all(cs.map(async (c, i) => {
+          for (let k = i; k < cards; k += writers) c.addCard(list, `card ${k}`);
+          await c.settled(300_000);
+        }));
+        const version = () => Number(psql(`SELECT version FROM boards WHERE id = '${seeded.board}'`)[0]);
+        // Pad to a multiple of 500 (a snapshot falls there), then add the tail.
+        const card = cs[0]!.view().lists[0]!.cards[0]!.id;
+        const renames = async (n: number) => {
+          for (let k = 0; k < n; k++) cs[0]!.setField(card, "title", `rename ${version()}-${k}`);
+          await cs[0]!.settled(300_000);
+        };
+        await renames((500 - (version() % 500)) % 500);
+        const snapAt = version();
+        await waitForRow(`SELECT 1 FROM board_snapshots WHERE board_id = '${seeded.board}' AND version = ${snapAt}`);
+        await renames(tail);
+        const snap = psql(`SELECT version, octet_length(state::text) FROM board_snapshots WHERE board_id = '${seeded.board}' ORDER BY version DESC LIMIT 1`)[0]!.split("|").map(Number);
+        const old = ownerOf(seeded.board).instance;
+        const before = await Promise.all([7001, 7002, 7003].map((p) => histogram(p, "claim_ms")));
+        const killedAt = Date.now();
+        compose("kill", "-s", "SIGKILL", old);
+        cs[1]!.setField(card, "title", "after the kill");
+        await cs[1]!.settled(120_000);
+        const firstAckMs = Date.now() - killedAt;
+        const after = await Promise.all([7001, 7002, 7003].map((p) => histogram(p, "claim_ms").catch(() => ({ sum: 0, count: 0 }))));
+        const next = ownerOf(seeded.board).instance;
+        const i = Number(next.replace("session", "")) - 1;
+        const claims = after[i]!.count - before[i]!.count;
+        console.log(`LOAD ${JSON.stringify({
+          test: "recovery", cards, board_version: version() - 1, snapshot_version: snap[0], tail_ops: version() - 1 - snap[0]!,
+          snapshot_json_bytes: snap[1], killed: old, new_owner: next, claims_on_new_owner: claims,
+          claim_ms: claims ? Math.round((after[i]!.sum - before[i]!.sum) / claims) : null, kill_to_first_ack_ms: firstAckMs,
+        })}`);
+        compose("start", old);
+        await waitHealthy(7000 + Number(old.replace("session", "")));
+        for (const c of cs) c.close();
+      }
+    }
+  }, 3_600_000);
+
   void compose;
 });
+
+async function waitForRow(sql: string): Promise<void> {
+  for (let i = 0; i < 300; i++) {
+    if (psql(sql).length > 0) return;
+    await sleep(200);
+  }
+  throw new Error(`not seen within 60s: ${sql}`);
+}
+
+async function waitHealthy(port: number): Promise<void> {
+  for (let i = 0; i < 120; i++) {
+    if (await fetch(`http://localhost:${port}/health`).then((r) => r.ok, () => false)) return;
+    await sleep(1_000);
+  }
+  throw new Error(`port ${port} not healthy within 120s`);
+}

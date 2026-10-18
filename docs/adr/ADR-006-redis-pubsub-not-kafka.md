@@ -42,5 +42,9 @@ from versions:
   rebuilt (ADR-007), presence is ephemeral.
 - Fan-out cost is Redis' (one publish per op, one delivery per subscribed gateway), not the
   owner's.
+- Two control channels use the same best-effort path, each with a fallback for a lost message:
+  `membership` (access changes; owners also refresh their 30s membership cache, amendment 8)
+  and `board-deleted` (the owner also notices at its next commit, reconcile or snapshot,
+  amendment 27).
 - In contrast with Reliant: there, losing a Kafka event was data loss; here, losing a
   Pub/Sub message is a version gap that the protocol detects and repairs.

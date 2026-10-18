@@ -31,7 +31,8 @@ v1 used float positions, which run out of precision after about 50 halvings of o
 - **RGA or another sequence CRDT.** No interleaving and no rebalancing, but a much larger
   surface (tombstoned elements, origin pointers) for a board with tens of cards per list.
 - **Random jitter in keys.** Avoids equal keys, but makes `keyBetween` non-deterministic and
-  vectors impossible. Kept as a possible Phase 3 client-side mitigation, not core behaviour.
+  vectors impossible. Not adopted: Phase 3 shipped without it, and interleaving stayed the
+  accepted anomaly below.
 
 ## Consequences
 

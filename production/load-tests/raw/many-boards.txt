@@ -1,0 +1,18 @@
+command: (cd client-core && LOAD=many-boards npx vitest run test/load)
+commit: d9f91b3 + uncommitted changes
+started: 2026-10-18T10:27:45Z
+
+ RUN  v3.2.7 C:/Users/sohan/OneDrive/Desktop/STUDY/Projects/Sde/Concord/client-core
+
+stdout | test/load/load.test.ts > §10.1 measurements > many-boards
+LOAD {"test":"many-boards","boards":300,"connections":1000,"editors":900,"joined_at_end":1000,"offered_ops_per_s":900,"seconds":121,"samples":251509,"p50":89,"p95":294,"p99":608,"max":1596,"committed_ops_per_s":890.5,"commits_per_s":299.5,"ops_per_commit":2.97,"generator_cores":1.24,"containers":{"gateway1":{"cpu_mean_pct":118.4,"cpu_peak_pct":167.99,"mem_peak_mib":524},"gateway2":{"cpu_mean_pct":101.1,"cpu_peak_pct":151.59,"mem_peak_mib":555},"postgres":{"cpu_mean_pct":158.4,"cpu_peak_pct":679.16,"mem_peak_mib":231},"redis":{"cpu_mean_pct":24.8,"cpu_peak_pct":29.2,"mem_peak_mib":8},"session1":{"cpu_mean_pct":69.1,"cpu_peak_pct":159.63,"mem_peak_mib":266},"session2":{"cpu_mean_pct":67.1,"cpu_peak_pct":165.93,"mem_peak_mib":246},"session3":{"cpu_mean_pct":70.6,"cpu_peak_pct":127.6,"mem_peak_mib":265},"toxiproxy":{"cpu_mean_pct":36.3,"cpu_peak_pct":49.18,"mem_peak_mib":13}}}
+
+ ✓ test/load/load.test.ts (7 tests | 6 skipped) 300287ms
+   ✓ §10.1 measurements > many-boards  300283ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  15:57:51
+   Duration  302.63s (transform 484ms, setup 0ms, collect 653ms, tests 300.29s, environment 1ms, prepare 463ms)
+
+ended: 2026-10-18T10:32:54Z
