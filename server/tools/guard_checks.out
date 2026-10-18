@@ -103,3 +103,11 @@ idle-unload-subscribers: removed keeping a board loaded while a gateway is subsc
 command: cd server && python tools/guard_checks.py log-redaction-ticket   (2026-10-17T21:27:41Z, after GatewayLogTest's Capture became an UnsynchronizedAppenderBase)
 log-redaction-ticket: removed redacting ticket= and session values in log lines (only access_token= left)
   test tokensNeverReachTheLogs: FAILED without the guard (secret in encoded output); PASSED with it restored
+
+command: cd server && python tools/guard_checks.py board-deleted-commit board-deleted-reconcile board-deleted-announced   (2026-10-18T04:20:42Z, amendment 27, uncommitted)
+board-deleted-commit: removed telling a deleted board from a newer owner when the commit's fence update matches nothing (amendment 27)
+  test anEditCommittingAfterTheDeletionIsRefusedNotAFenceAlert: FAILED without the guard (org.opentest4j.AssertionFailedError: got {type=ERROR, code=NOT_OWNER, op_id=853f805e-058d-4ffb-9faa-c844f2424a22, detail=fenced out} ==> expected: <UNAUTHORIZED> but was: <NOT_OWNER>); PASSED with it restored
+board-deleted-reconcile: removed ending reconciling when the board was deleted, instead of retrying forever (amendment 27)
+  test reconcilingOnADeletedBoardEndsInsteadOfRetryingForever: FAILED without the guard (org.opentest4j.AssertionFailedError: the deleted board is dropped within 15s ==> expected: <null> but was: <dev.concord.session.BoardActor@13746b0d>); PASSED with it restored
+board-deleted-announced: removed dropping a loaded board when its deletion is announced (amendment 27)
+  test anAnnouncedDeletionDropsTheBoardAtOnceWithNoSnapshot: FAILED without the guard (org.opentest4j.AssertionFailedError: the deleted board is dropped within 15s ==> expected: <null> but was: <dev.concord.session.BoardActor@1d6434cf>); PASSED with it restored

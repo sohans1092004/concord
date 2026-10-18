@@ -29,7 +29,8 @@ import org.slf4j.LoggerFactory;
  *   CLAIMING ──claim+load ok──▶ SERVING ──commit failed / timed out──▶ RECONCILING
  *       │                        │  ▲                                     │
  *       └──not owner──▶ CLOSED ◀─┘  └──────────── reload ok ─────────────┘
- *                         ▲  fenced out, lease lost, released, unloaded when idle (amendment 26)
+ *                         ▲  fenced out, lease lost, released, unloaded when idle (amendment 26),
+ *                            board deleted (amendment 27)
  * </pre>
  */
 public final class BoardActor {
@@ -71,6 +72,9 @@ public final class BoardActor {
 
     /** Graceful handover (SPEC §2.4): flush, snapshot, release the lease. */
     public record Release(CompletableFuture<Void> done) implements Item {}
+
+    /** The board was deleted (amendment 27): drop it now, no snapshot, release the lease. */
+    public record Deleted() implements Item {}
 
     enum State { CLAIMING, SERVING, RECONCILING, CLOSED }
 
@@ -154,7 +158,7 @@ public final class BoardActor {
     public Offered offer(Item item) {
         synchronized (closeLock) {
             if (state == State.CLOSED) return Offered.CLOSED;
-            boolean control = item instanceof Drop || item instanceof Release;
+            boolean control = item instanceof Drop || item instanceof Release || item instanceof Deleted;
             if (!control && mailbox.size() >= MAILBOX_LIMIT) return Offered.FULL;
             mailbox.add(item);
             return Offered.ACCEPTED;
@@ -251,6 +255,7 @@ public final class BoardActor {
                 close(Msg.NOT_OWNER, dr.reason());
             }
             case Release r -> release(r);
+            case Deleted x -> dropDeleted("announced");
         }
     }
 
@@ -382,6 +387,12 @@ public final class BoardActor {
         Store.Committed c;
         try {
             c = d.store().commit(id, fence, ops, started + COMMIT_TIMEOUT_MS);
+        } catch (Store.BoardDeleted e) {
+            // Amendment 27: nothing can be stored on a deleted board. The ops end in the senders'
+            // Unsent edits (UNAUTHORIZED), where they can read and export them.
+            for (Waiting w : waiting) for (Reply r : w.replies()) r.send(Msg.error(Msg.UNAUTHORIZED, w.pending().op().opId(), "board deleted"));
+            dropDeleted("found at commit");
+            return;
         } catch (SQLException | RuntimeException e) {
             // Step 5: apply nothing, ACK nothing. The outcome is unknown, so reconcile before
             // anything else: the transaction may have committed after all (amendment 6).
@@ -502,6 +513,9 @@ public final class BoardActor {
                         .addKeyValue("version", version).log("reconciled after commit failure");
                 state = State.SERVING;
                 return;
+            } catch (Store.BoardDeleted e) {
+                dropDeleted("found while reconciling"); // retrying would never end
+                return;
             } catch (SQLException | RuntimeException e) {
                 long until = d.clock().getAsLong() + backoff;
                 for (long left; state == State.RECONCILING && (left = until - d.clock().getAsLong()) > 0; ) {
@@ -527,6 +541,7 @@ public final class BoardActor {
                 close(Msg.NOT_OWNER, "released");
                 r.done().complete(null);
             }
+            case Deleted x -> dropDeleted("announced while reconciling");
             default -> replyError(item, Msg.RETRY_LATER, "board is reconciling with storage");
         }
     }
@@ -598,6 +613,9 @@ public final class BoardActor {
             d.metrics().inc("snapshots");
             log.atInfo().addKeyValue("board_id", id).addKeyValue("version", version).addKeyValue("bytes", canonical.length())
                     .addKeyValue("ms", d.clock().getAsLong() - started).log("snapshot written");
+        } catch (Store.BoardDeleted e) {
+            dropDeleted("found at snapshot");
+            return;
         } catch (SQLException | RuntimeException e) {
             log.atError().addKeyValue("board_id", id).log("snapshot failed: {}", e.toString());
         }
@@ -619,6 +637,7 @@ public final class BoardActor {
         if (!batch.isEmpty() || !mailbox.isEmpty()) return; // never with ops still to commit or answer
         if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say
         if (opsSinceSnapshot > 0) snapshot();
+        if (state != State.SERVING) return; // the snapshot found the board deleted
         safeRelease();
         d.metrics().inc("idle_unloads");
         log.atInfo().addKeyValue("board_id", id).addKeyValue("version", version)
@@ -631,10 +650,24 @@ public final class BoardActor {
         if (!batch.isEmpty()) flush();
         if (state == State.SERVING) {
             if (opsSinceSnapshot > 0) snapshot();
-            safeRelease();
-            close(Msg.NOT_OWNER, "released");
+            if (state == State.SERVING) { // the snapshot may have found the board deleted
+                safeRelease();
+                close(Msg.NOT_OWNER, "released");
+            }
         }
         r.done().complete(null);
+    }
+
+    /**
+     * Amendment 27: the board was deleted while loaded. Close with UNAUTHORIZED for everything
+     * queued (it does not exist any more), release the lease, and take no snapshot.
+     */
+    private void dropDeleted(String how) {
+        if (state == State.CLOSED) return;
+        d.metrics().inc("boards_deleted");
+        log.atInfo().addKeyValue("board_id", id).log("board deleted ({}): dropped", how);
+        safeRelease();
+        close(Msg.UNAUTHORIZED, "board deleted");
     }
 
     private void safeRelease() {
@@ -671,6 +704,7 @@ public final class BoardActor {
             case Ensure e -> e.reply().send(Msg.error(code, null, why));
             case Drop dr -> {}
             case Release r -> r.done().complete(null);
+            case Deleted x -> {}
         }
     }
 

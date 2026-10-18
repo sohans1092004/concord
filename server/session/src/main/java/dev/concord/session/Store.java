@@ -44,6 +44,22 @@ public class Store {
     /** Outcome of a group commit. {@code fenced}: a newer owner exists and nothing was written. */
     public record Committed(boolean fenced, Map<String, Long> duplicates, List<Long> versions) {}
 
+    /** The board's row is gone: it was deleted (an account deletion, amendment 27). Not retryable. */
+    public static final class BoardDeleted extends SQLException {
+        BoardDeleted(String board) {
+            super("board " + board + " was deleted");
+        }
+    }
+
+    private static boolean exists(Connection c, String board) throws SQLException {
+        try (PreparedStatement q = c.prepareStatement("SELECT 1 FROM boards WHERE id = ?")) {
+            q.setObject(1, UUID.fromString(board));
+            try (ResultSet r = q.executeQuery()) {
+                return r.next();
+            }
+        }
+    }
+
     // ---- write path, SPEC §6.1 step 3 ------------------------------------------------------
 
     /**
@@ -71,7 +87,10 @@ public class Store {
                 u.setLong(3, fence);
                 try (ResultSet r = u.executeQuery()) {
                     if (!r.next()) {
+                        // Zero rows: a newer owner's fence, or no board at all. Only the first is a fence alert.
+                        boolean deleted = !exists(c, board);
                         c.rollback();
+                        if (deleted) throw new BoardDeleted(board);
                         return new Committed(true, Map.of(), List.of());
                     }
                     end = r.getLong(1);
@@ -169,7 +188,7 @@ public class Store {
             try (PreparedStatement q = c.prepareStatement("SELECT fence FROM boards WHERE id = ? FOR UPDATE")) {
                 q.setObject(1, UUID.fromString(board));
                 try (ResultSet r = q.executeQuery()) {
-                    if (!r.next()) throw new SQLException("board " + board + " vanished");
+                    if (!r.next()) throw new BoardDeleted(board); // retrying cannot bring it back
                     fence = r.getLong(1);
                 }
             }
@@ -264,6 +283,13 @@ public class Store {
                 ins.setString(3, canonical);
                 ins.setString(4, Msg.sha256Hex(canonical));
                 ins.executeUpdate();
+            } catch (SQLException e) {
+                // 23503 foreign_key_violation: the board row is gone (deleted), unless it is not.
+                if ("23503".equals(e.getSQLState())) {
+                    c.rollback();
+                    if (!exists(c, board)) throw new BoardDeleted(board);
+                }
+                throw e;
             }
             try (PreparedStatement del = c.prepareStatement(
                     "DELETE FROM board_snapshots WHERE board_id = ? AND version NOT IN "

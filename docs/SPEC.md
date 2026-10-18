@@ -121,7 +121,7 @@ the API.
 | `GET/POST /api/boards/{id}/members`, `PATCH/DELETE …/members/{user}` | List; add an existing user by email with a role; change a role; remove (an owner, or a member leaving) |
 | `GET /api/boards/{id}/history?before_version=&limit=` | `board_ops` of the last 30 days, newest first, 50 per page (200 at most), with the sender's name; the owner's rebalancing ops have no user |
 | `POST /api/bug-reports` | The trial's in-app report: description and the diagnostics the tester left ticked, redacted (§9.4) |
-| `DELETE /api/me` | With the password: deletes the account, the boards only that user belongs to and their bug reports; on shared boards they leave (the last owner's role passes to the longest-standing member) and their past ops stay, unnamed (amendment 25) |
+| `DELETE /api/me` | With the password: deletes the account, the boards only that user belongs to and their bug reports; on shared boards they leave (the last owner's role passes to the longest-standing member) and their past ops stay, unnamed (amendment 25). A deleted board's owner drops it at once (§2.6, amendment 27) |
 
 ### 2.2 Board actor and threads
 
@@ -192,6 +192,22 @@ board nobody has open (amendment 26):
   - about 3.0 KB of heap (534 B of snapshot) per deleted card, kept for the board's life.
   - So a board used daily for 30 days, assuming 500 ops a day of which 50 delete a card, holds
     about 6 MB while loaded.
+
+### 2.6 Deleted boards
+
+An account deletion deletes the boards that account alone belonged to (amendment 25). Their
+owner may have one loaded. Amendment 27:
+
+- **Announced:** after the deletion commits, the gateway publishes each deleted board's ID on
+  Redis channel `board-deleted`. The owner drops the board at once: no snapshot, lease
+  released, every queued request answered `UNAUTHORIZED` "board deleted", so an edit in flight
+  ends in its sender's Unsent edits, readable and exportable, not silently lost.
+- **Found:** if the message is lost, the owner finds out at its next write, and drops the board
+  the same way:
+  - a commit whose fence update matches no row checks whether the board exists. No board means
+    deleted, not a newer owner, so no fence alert.
+  - a reconcile that finds no board row stops, instead of retrying forever.
+  - a snapshot refused by the foreign key, with no board row, means deleted.
 
 ## 3. CRDT design
 
@@ -1120,3 +1136,4 @@ section text itself is updated in the same commit.
 | 24 | 2026-10-17 | §9.6 (new), §9.4 | Trial deployment: Caddy with Let's Encrypt as the only open ports; 1 gateway, 2 Session instances, Postgres, Redis, backups; explicit heaps and memory limits; production refuses every dev value (`Config.checkPublic`); the gateway sets the CSP and `/healthz` checks Postgres and free disk. The server image uses the JDK (jcmd for memory checks). |
 | 25 | 2026-10-17 | §2.1, §9.6 | Verified backups (`Backup dump`/`verify`, one exported snapshot for dump and manifest; guard check `backup-verify-replay`). Account deletion, `DELETE /api/me` and `Accounts delete <email>` (guard check `delete-user-heir`). |
 | 26 | 2026-10-17 | §2.5 (new) | An owner unloads a board after 10 minutes with no request and no gateway subscribed to its channel, through the graceful handover path (snapshot, release the lease, close); never while reconciling, with ops in the mailbox or batch, or when Redis cannot count subscribers. Found by the Phase 4a soak: without it, a Session instance's heap grew with the history of every board it had loaded (`IdleUnloadTest`; guard checks `idle-unload-not-reconciling`, `idle-unload-subscribers`). |
+| 27 | 2026-10-18 | §2.6 (new), §2.1 | A board deleted while its owner has it loaded is dropped: announced on `board-deleted`, or found at the next commit (no fence alert), reconcile (no endless retry) or snapshot; no snapshot, lease released, queued requests get UNAUTHORIZED "board deleted". Found on the live host: the smoke test's account deletion left a loaded board whose snapshot failed on the foreign key (`BoardDeletedTest`; guard checks `board-deleted-commit`, `board-deleted-reconcile`, `board-deleted-announced`). |

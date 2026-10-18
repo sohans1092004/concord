@@ -13,6 +13,8 @@ public final class RedisKeys {
     public static final long RENEW_MS = 5_000;
     /** Membership changed on a board; payload is the board ID (clears §4.2 caches). */
     public static final String MEMBERSHIP_CHANNEL = "membership";
+    /** A board was deleted (account deletion); payload is the board ID. Its owner drops it (amendment 27). */
+    public static final String BOARD_DELETED_CHANNEL = "board-deleted";
 
     public static String lease(String board) {
         return "board:lease:" + board;

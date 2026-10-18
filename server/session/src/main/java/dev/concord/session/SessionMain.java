@@ -44,9 +44,13 @@ public final class SessionMain implements AutoCloseable {
             @Override
             public void message(String channel, String board) {
                 membership.invalidate(board);
+                if (RedisKeys.BOARD_DELETED_CHANNEL.equals(channel)) { // amendment 27
+                    BoardActor a = boards.actor(board);
+                    if (a != null) a.offer(new BoardActor.Deleted());
+                }
             }
         });
-        membershipSub.sync().subscribe(RedisKeys.MEMBERSHIP_CHANNEL);
+        membershipSub.sync().subscribe(RedisKeys.MEMBERSHIP_CHANNEL, RedisKeys.BOARD_DELETED_CHANNEL);
         this.server = new InternalServer(boards, metrics, config.port(), config.internalSecret());
         this.registry = new Registry(redis.conn.sync(), new Rendezvous.Instance(config.instanceId(), config.advertise()), System::currentTimeMillis);
         log.atInfo().addKeyValue("instance", config.instanceId()).addKeyValue("address", config.advertise()).log("session instance up");

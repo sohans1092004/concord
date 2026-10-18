@@ -74,13 +74,24 @@ final class Accounts {
         return new Deleted(userId, deleted, left, reports);
     }
 
-    /** Owners drop the changed boards from their membership caches (SPEC §5.2). */
+    /**
+     * Owners drop the changed boards from their membership caches (SPEC §5.2), and drop deleted
+     * boards altogether (amendment 27). Called after the deletion committed.
+     */
     static void announce(io.lettuce.core.api.sync.RedisCommands<String, String> redis, Deleted d) {
         for (String b : d.boardsLeft()) {
             try {
                 redis.publish(RedisKeys.MEMBERSHIP_CHANNEL, b);
             } catch (RuntimeException e) {
                 // a lost message only delays revocation to the 30s cache TTL
+            }
+        }
+        for (String b : d.boardsDeleted()) {
+            try {
+                redis.publish(RedisKeys.BOARD_DELETED_CHANNEL, b);
+            } catch (RuntimeException e) {
+                // a lost message: the owner finds the board gone at its next commit, reconcile or
+                // snapshot, and drops it then (Store.BoardDeleted)
             }
         }
     }

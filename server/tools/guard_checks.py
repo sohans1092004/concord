@@ -18,6 +18,7 @@ STORE = "session/src/main/java/dev/concord/session/Store.java"
 OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
 API = "gateway/src/main/java/dev/concord/gateway/Api.java"
 ACCOUNTS = "gateway/src/main/java/dev/concord/gateway/Accounts.java"
+SESSIONMAIN = "session/src/main/java/dev/concord/session/SessionMain.java"
 BACKUP = "session/src/main/java/dev/concord/session/Backup.java"
 ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
 PRESENCE = "gateway/src/main/java/dev/concord/gateway/Presence.java"
@@ -112,6 +113,21 @@ CHECKS = {
         "keeping a board loaded while a gateway is subscribed to its channel (amendment 26)",
         [(ACTOR, "        if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say\n", "")],
         "dev.concord.session.IdleUnloadTest.anIdleBoardIsUnloadedAndARejoinConverges", True),
+    "board-deleted-commit": (
+        "telling a deleted board from a newer owner when the commit's fence update matches nothing (amendment 27)",
+        [(STORE, "                        if (deleted) throw new BoardDeleted(board);\n", "")],
+        "dev.concord.session.BoardDeletedTest.anEditCommittingAfterTheDeletionIsRefusedNotAFenceAlert", True),
+    "board-deleted-reconcile": (
+        "ending reconciling when the board was deleted, instead of retrying forever (amendment 27)",
+        [(ACTOR, """            } catch (Store.BoardDeleted e) {
+                dropDeleted("found while reconciling"); // retrying would never end
+                return;
+""", "")],
+        "dev.concord.session.BoardDeletedTest.reconcilingOnADeletedBoardEndsInsteadOfRetryingForever", True),
+    "board-deleted-announced": (
+        "dropping a loaded board when its deletion is announced (amendment 27)",
+        [(SESSIONMAIN, "                    if (a != null) a.offer(new BoardActor.Deleted());\n", "")],
+        "dev.concord.session.BoardDeletedTest.anAnnouncedDeletionDropsTheBoardAtOnceWithNoSnapshot", True),
     "delete-user-heir": (
         "making a remaining member owner when a deleted user was a shared board's last owner",
         [(ACCOUNTS, "                        exec(c, \"UPDATE board_members SET role = 'owner' WHERE board_id = ? AND user_id = ?\", b, UUID.fromString(heir));\n", "")],
