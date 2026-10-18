@@ -19,6 +19,7 @@ OWNERSHIP = "session/src/main/java/dev/concord/session/Ownership.java"
 API = "gateway/src/main/java/dev/concord/gateway/Api.java"
 ACCOUNTS = "gateway/src/main/java/dev/concord/gateway/Accounts.java"
 SESSIONMAIN = "session/src/main/java/dev/concord/session/SessionMain.java"
+RETENTION = "gateway/src/main/java/dev/concord/gateway/Retention.java"
 BACKUP = "session/src/main/java/dev/concord/session/Backup.java"
 ENCODER = "common/src/main/java/dev/concord/common/RedactingJsonEncoder.java"
 PRESENCE = "gateway/src/main/java/dev/concord/gateway/Presence.java"
@@ -102,8 +103,8 @@ CHECKS = {
         [(API, "        if (!trustedProxyAddresses().contains(socket)) return socket;\n", "")],
         "dev.concord.gateway.ApiTest.forwardedForIsBelievedOnlyFromTheTrustedProxy", True),
     "backup-verify-replay": (
-        "checking each board's full replay against the backup manifest (Phase 4a step 5)",
-        [(BACKUP, "                if (!expected.equals(viaReplay)) problems.add(board + \": full replay \" + viaReplay + \", manifest \" + expected);\n", "")],
+        "checking each board's replay from its oldest base against the backup manifest (Phase 4a step 5, amendment 28)",
+        [(BACKUP, "                if (!expected.equals(viaReplay)) problems.add(board + \": replay from the oldest base \" + viaReplay + \", manifest \" + expected);\n", "")],
         "dev.concord.session.BackupTest.verifyPassesOnTheSameDataAndCatchesDamage", True),
     "idle-unload-not-reconciling": (
         "never unloading an idle board while it reconciles an unknown commit outcome (amendment 26)",
@@ -113,6 +114,14 @@ CHECKS = {
         "keeping a board loaded while a gateway is subscribed to its channel (amendment 26)",
         [(ACTOR, "        if (d.subscribers().count(id) != 0) return; // someone has it open, or Redis cannot say\n", "")],
         "dev.concord.session.IdleUnloadTest.anIdleBoardIsUnloadedAndARejoinConverges", True),
+    "retention-below-snapshot": (
+        "op retention never deleting an op above a kept snapshot (SPEC 5.1, amendment 28)",
+        [(RETENTION, " WHERE o.version <= k.oldest\"", " WHERE true\"")],
+        "dev.concord.gateway.RetentionTest.deletesOnlyOldOpsAtOrBelowTheOldestKeptSnapshot", True),
+    "retention-oldest-snapshot": (
+        "bounding op retention by the OLDEST kept snapshot, not the newest, so the corrupt-snapshot fallback replays a complete tail (amendment 28)",
+        [(RETENTION, "SELECT board_id, min(version) AS oldest", "SELECT board_id, max(version) AS oldest")],
+        "dev.concord.gateway.RetentionTest.deletesOnlyOldOpsAtOrBelowTheOldestKeptSnapshot", True),
     "board-deleted-commit": (
         "telling a deleted board from a newer owner when the commit's fence update matches nothing (amendment 27)",
         [(STORE, "                        if (deleted) throw new BoardDeleted(board);\n", "")],

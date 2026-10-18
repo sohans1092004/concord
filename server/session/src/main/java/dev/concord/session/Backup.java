@@ -98,25 +98,19 @@ public final class Backup {
         }
     }
 
-    static Map<String, Object> manifest(Connection conn) throws SQLException {
+    public static Map<String, Object> manifest(Connection conn) throws SQLException {
         Map<String, Object> rows = new LinkedHashMap<>();
         for (String t : TABLES) rows.put(t, count(conn, "SELECT count(*) FROM " + t));
         Map<String, Object> boards = new LinkedHashMap<>();
         for (String board : boards(conn)) {
-            List<Op> ops = new ArrayList<>();
-            try (PreparedStatement q = conn.prepareStatement("SELECT payload::text FROM board_ops WHERE board_id = ? ORDER BY version")) {
-                q.setObject(1, UUID.fromString(board));
-                try (ResultSet r = q.executeQuery()) {
-                    while (r.next()) ops.add(Op.parse(Json.parse(r.getString(1))));
-                }
-            }
-            boards.put(board, Msg.obj("version", version(conn, board), "ops", (long) ops.size(), "sha256", hash(ops)));
+            long ops = count(conn, "SELECT count(*) FROM board_ops WHERE board_id = '" + UUID.fromString(board) + "'");
+            boards.put(board, Msg.obj("version", version(conn, board), "ops", ops, "sha256", replayHash(conn, board)));
         }
         return Msg.obj("rows", rows, "boards", boards);
     }
 
     /** The restored database matches the manifest: counts, and every board two ways. */
-    static List<String> verify(DataSource ds, Map<String, Object> manifest) throws SQLException {
+    public static List<String> verify(DataSource ds, Map<String, Object> manifest) throws SQLException {
         List<String> problems = new ArrayList<>();
         Store store = new Store(ds);
         try (Connection conn = ds.getConnection()) {
@@ -133,19 +127,56 @@ public final class Backup {
                 String expected = (String) ((Map<?, ?>) e.getValue()).get("sha256");
                 Store.Loaded loaded = store.load(board); // what a new owner would load: snapshot + tail
                 String viaSnapshot = Msg.sha256Hex(loaded.board().canonical());
-                List<Op> ops = store.opsAfter(board, 0, Integer.MAX_VALUE).stream().map(Store.Stored::op).toList();
-                String viaReplay = hash(ops);
+                String viaReplay = replayHash(conn, board);
                 if (!expected.equals(viaSnapshot)) problems.add(board + ": snapshot + ops " + viaSnapshot + ", manifest " + expected);
-                if (!expected.equals(viaReplay)) problems.add(board + ": full replay " + viaReplay + ", manifest " + expected);
+                if (!expected.equals(viaReplay)) problems.add(board + ": replay from the oldest base " + viaReplay + ", manifest " + expected);
                 if (loaded.corruptSnapshots() > 0) problems.add(board + ": " + loaded.corruptSnapshots() + " snapshot(s) failed their checksum");
             }
         }
         return problems;
     }
 
-    private static String hash(List<Op> ops) {
+    /**
+     * The board's state replayed independently of Store.load (which starts from the newest good
+     * snapshot): from version 0 when every op is kept, otherwise (op retention, amendment 28)
+     * from the oldest kept snapshot that passes its checksum, whose version retention never
+     * deletes past. Then every later op, in order.
+     */
+    static String replayHash(Connection conn, String board) throws SQLException {
+        UUID id = UUID.fromString(board);
+        long firstOp = 0;
+        try (PreparedStatement q = conn.prepareStatement("SELECT coalesce(min(version), 0) FROM board_ops WHERE board_id = ?")) {
+            q.setObject(1, id);
+            try (ResultSet r = q.executeQuery()) {
+                r.next();
+                firstOp = r.getLong(1);
+            }
+        }
         Board b = Board.empty();
-        for (Op op : ops) b.apply(op);
+        long from = 0;
+        if (firstOp > 1) { // ops 1..firstOp-1 were pruned: start from a snapshot at or after firstOp-1
+            try (PreparedStatement q = conn.prepareStatement(
+                    "SELECT version, state::text, sha256 FROM board_snapshots WHERE board_id = ? AND version >= ? ORDER BY version")) {
+                q.setObject(1, id);
+                q.setLong(2, firstOp - 1);
+                try (ResultSet r = q.executeQuery()) {
+                    Board base = null;
+                    while (base == null && r.next()) {
+                        base = Store.verified(r.getString(2), r.getString(3));
+                        from = r.getLong(1);
+                    }
+                    if (base == null) return "unreplayable: ops before " + firstOp + " pruned and no good snapshot from " + (firstOp - 1);
+                    b = base;
+                }
+            }
+        }
+        try (PreparedStatement q = conn.prepareStatement("SELECT payload::text FROM board_ops WHERE board_id = ? AND version > ? ORDER BY version")) {
+            q.setObject(1, id);
+            q.setLong(2, from);
+            try (ResultSet r = q.executeQuery()) {
+                while (r.next()) b.apply(Op.parse(Json.parse(r.getString(1))));
+            }
+        }
         return Msg.sha256Hex(b.canonical());
     }
 

@@ -38,11 +38,11 @@ class BackupTest {
             assertTrue(before.stream().noneMatch(p -> p.contains(h.board) || p.contains("rows")), before.toString());
 
             // Damage an op from before the snapshot: the load (snapshot + tail) still looks fine,
-            // only the full replay shows it.
+            // only the replay from the oldest base (here version 0: nothing pruned) shows it.
             Seed.count(h.db, "WITH x AS (UPDATE board_ops SET payload = jsonb_set(payload, '{title}', '\"tampered\"') "
                     + "WHERE board_id = ? AND version = 2 RETURNING 1) SELECT count(*) FROM x", UUID.fromString(h.board));
             List<String> problems = Backup.verify(h.db, manifest);
-            assertTrue(problems.stream().anyMatch(p -> p.contains(h.board) && p.contains("full replay")), problems.toString());
+            assertTrue(problems.stream().anyMatch(p -> p.contains(h.board) && p.contains("replay from the oldest base")), problems.toString());
 
             // Damage the snapshot: its checksum fails, and the problem is reported.
             Seed.count(h.db, "WITH x AS (UPDATE board_snapshots SET state = jsonb_set(state, '{registers}', '{}') "

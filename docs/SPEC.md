@@ -553,9 +553,11 @@ and lets clients detect gaps (§6.4). It is not used for merge; the HLC is.
 Snapshots are written every 500 ops or 60s of activity, whichever comes first. The last
 three per board are kept.
 
-Op retention: ops older than 35 days and at or below the latest snapshot's version are
-deleted daily. History covers 30 days. A client behind the oldest kept op gets a full
-snapshot (§7).
+Op retention: ops older than 35 days and at or below the version of the board's **oldest
+kept** snapshot are deleted daily (amendment 28). That bound keeps every kept snapshot
+replayable forward, so the corrupt-snapshot fallback (§8 row 13) never meets a hole in the
+tail. A board with no snapshot loses no ops. History covers 30 days. A client behind the
+oldest kept op gets a full snapshot (§7). The gateway runs it, in batches of 5,000.
 
 ### 5.2 Redis
 
@@ -1016,11 +1018,12 @@ One VM (`deploy/prod/compose.yaml`; operations in `docs/runbook.md`):
 - **Backups:** nightly. `pg_dump` and a manifest are taken from one exported Postgres snapshot,
   encrypted with `age` to a key that is not on the VM, and stored off-machine with `rclone`,
   14 days kept.
-  - The manifest holds every table's row count and every board's version and state hash (a
-    full replay of its ops).
+  - The manifest holds every table's row count and every board's version and state hash: a
+    replay of its ops from version 0, or, once retention has pruned some, from the oldest kept
+    snapshot that passes its checksum (amendment 28).
   - A restore counts only once verified: row counts equal, and every board's state, loaded both
-    as a new owner loads it (snapshot plus later ops) and by full replay, hashes to the
-    manifest's value (`dev.concord.session.Backup`, `deploy/prod/restore.sh`).
+    as a new owner loads it (newest good snapshot plus later ops) and by that replay, hashes to
+    the manifest's value (`dev.concord.session.Backup`, `deploy/prod/restore.sh`).
 
 ## 10. Phases
 
@@ -1137,3 +1140,4 @@ section text itself is updated in the same commit.
 | 25 | 2026-10-17 | §2.1, §9.6 | Verified backups (`Backup dump`/`verify`, one exported snapshot for dump and manifest; guard check `backup-verify-replay`). Account deletion, `DELETE /api/me` and `Accounts delete <email>` (guard check `delete-user-heir`). |
 | 26 | 2026-10-17 | §2.5 (new) | An owner unloads a board after 10 minutes with no request and no gateway subscribed to its channel, through the graceful handover path (snapshot, release the lease, close); never while reconciling, with ops in the mailbox or batch, or when Redis cannot count subscribers. Found by the Phase 4a soak: without it, a Session instance's heap grew with the history of every board it had loaded (`IdleUnloadTest`; guard checks `idle-unload-not-reconciling`, `idle-unload-subscribers`). |
 | 27 | 2026-10-18 | §2.6 (new), §2.1 | A board deleted while its owner has it loaded is dropped: announced on `board-deleted`, or found at the next commit (no fence alert), reconcile (no endless retry) or snapshot; no snapshot, lease released, queued requests get UNAUTHORIZED "board deleted". Found on the live host: the smoke test's account deletion left a loaded board whose snapshot failed on the foreign key (`BoardDeletedTest`; guard checks `board-deleted-commit`, `board-deleted-reconcile`, `board-deleted-announced`). |
+| 28 | 2026-10-18 | §5.1, §9.6 | Op retention bounded by the oldest of the three kept snapshots, not the latest: with the latest, a corrupt newest snapshot would fall back (§8 row 13) to an older one whose tail had been deleted. Runs daily in the gateway, in batches. The backup manifest's independent replay starts from the oldest kept snapshot that passes its checksum (from version 0 when nothing was pruned), instead of from version 1 (`RetentionTest`; guard checks `retention-below-snapshot`, `retention-oldest-snapshot`). |

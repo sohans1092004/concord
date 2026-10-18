@@ -111,3 +111,12 @@ board-deleted-reconcile: removed ending reconciling when the board was deleted, 
   test reconcilingOnADeletedBoardEndsInsteadOfRetryingForever: FAILED without the guard (org.opentest4j.AssertionFailedError: the deleted board is dropped within 15s ==> expected: <null> but was: <dev.concord.session.BoardActor@13746b0d>); PASSED with it restored
 board-deleted-announced: removed dropping a loaded board when its deletion is announced (amendment 27)
   test anAnnouncedDeletionDropsTheBoardAtOnceWithNoSnapshot: FAILED without the guard (org.opentest4j.AssertionFailedError: the deleted board is dropped within 15s ==> expected: <null> but was: <dev.concord.session.BoardActor@1d6434cf>); PASSED with it restored
+
+command: cd server && python tools/guard_checks.py retention-below-snapshot   (2026-10-18, amendment 28, uncommitted; the same run's other two checks were spoiled by Docker Desktop's engine failing, rerun below)
+retention-below-snapshot: removed op retention never deleting an op above a kept snapshot (SPEC 5.1, amendment 28)
+  test deletesOnlyOldOpsAtOrBelowTheOldestKeptSnapshot: FAILED without the guard (org.opentest4j.AssertionFailedError: only ops 1..500: the oldest kept snapshot, not the newest (1,500) ==> expected: <500> but was: <1500>); PASSED with it restored
+command: cd server && python tools/guard_checks.py retention-oldest-snapshot backup-verify-replay   (2026-10-18T06:00:59Z, after restarting Docker Desktop)
+retention-oldest-snapshot: removed bounding op retention by the OLDEST kept snapshot, not the newest, so the corrupt-snapshot fallback replays a complete tail (amendment 28)
+  test deletesOnlyOldOpsAtOrBelowTheOldestKeptSnapshot: FAILED without the guard (org.opentest4j.AssertionFailedError: only ops 1..500: the oldest kept snapshot, not the newest (1,500) ==> expected: <500> but was: <1500>); PASSED with it restored
+backup-verify-replay: removed checking each board's replay from its oldest base against the backup manifest (Phase 4a step 5, amendment 28)
+  test verifyPassesOnTheSameDataAndCatchesDamage: FAILED without the guard (org.opentest4j.AssertionFailedError: [] ==> expected: <true> but was: <false>); PASSED with it restored

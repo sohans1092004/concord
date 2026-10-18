@@ -63,6 +63,8 @@ public final class GatewayMain implements AutoCloseable {
         });
         Api api = new Api(app, db, redis.conn.sync(), config, System::currentTimeMillis);
         cleaner.scheduleWithFixedDelay(api::cleanup, 60, 60, java.util.concurrent.TimeUnit.SECONDS);
+        // Op retention (SPEC §5.1, amendment 28): daily, the first run 10 minutes after start.
+        cleaner.scheduleWithFixedDelay(() -> Retention.daily(db), 10, 24 * 60, java.util.concurrent.TimeUnit.MINUTES);
         app.get("/health", ctx -> ctx.result("ok"));
         // For the uptime monitor and compose: up, Postgres answering (Redis down is survivable, §8),
         // and the disk not nearly full. The container's root sits on the host's Docker disk, so
